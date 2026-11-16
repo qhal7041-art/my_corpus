@@ -1,0 +1,9 @@
+{
+  "metadata": {"region": "서울", "synthetic": true},
+  "utterances": [
+    {"id": "s1", "text": "오늘 날씨가 참 좋네요."},
+    {"id": "s2", "text": "같이 밥 먹으러 갈까요?"},
+    {"id": "s3", "text": null},
+    {"id": "s4", "note": "텍스트 누락 예시"}
+  ]
+}

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "korean-corpus-desktop"
+version = "0.1.0"
+description = "한국어 JSON 말뭉치 탐색 및 연구 프로젝트 관리"
+requires-python = ">=3.10"
+dependencies = ["PyQt6>=6.7,<7"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+corpus-desktop = "corpus_app.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["corpus_app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
