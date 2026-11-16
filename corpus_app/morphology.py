@@ -8,8 +8,9 @@ import json
 import os
 import sqlite3
 import tempfile
+import uuid
 from .json_corpus import Report, Cancelled, checkpoint, json_files, extract_document
-from .analyzers.registry import create, engine_version
+from .analyzers.registry import create, engine_version, public_config, model_identity
 from .input_formats import documents, CorpusReadError
 
 FORMAT = 1
@@ -40,16 +41,17 @@ def load_result(filename):
         return MorphResult(report, str(path), meta['config'], preview, meta['tokens'])
 
 
-def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=None):
+def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=None, *, api_key=''):
     cancel = cancel or Event()
     progress = progress or (lambda *args: None)
     folder = Path(folder).resolve()
     if not folder.is_dir() or selected is None:
         raise ValueError('연결된 폴더와 텍스트 필드를 먼저 선택하세요.')
-    if config.get('name') != 'kiwi' or not engine_version():
-        raise ValueError('사용 가능한 Kiwi 설치가 필요합니다.')
+    config = public_config(config)
+    if not engine_version(config['name']):
+        raise ValueError('선택한 분석기의 Python 패키지를 먼저 설치하세요.')
     config = json.loads(pack(config))
-    config.update({'engine_version': engine_version(), 'model_type': 'cong',
+    config.update({'engine_version': engine_version(config['name']),
                    'preprocessing': 'identity', 'format': FORMAT,
                    'input_policy': 'json-utf8/txt-utf8-or-cp949/excel-cached-values-v1',
                    'source_folder': str(folder), 'field_path': list(selected)})
@@ -58,9 +60,11 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
     fd, temporary = tempfile.mkstemp(suffix='.sqlite.tmp', dir=result_dir)
     os.close(fd)
     db = None
+    analyzer = None
     report = Report()
     token_count = 0
     try:
+        config['model_type'] = model_identity(config['name'], config['options'], cancel)
         db = sqlite3.connect(temporary)
         db.executescript('''
             CREATE TABLE inputs (path TEXT PRIMARY KEY, digest TEXT);
@@ -85,9 +89,10 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
             if report.discovered % 25 == 0 or report.discovered == 1:
                 progress(report.discovered, 0, report.failed)
         checkpoint(cancel)
-        destination = result_dir / (fingerprint.hexdigest() + '.sqlite')
+        suffix = '-' + uuid.uuid4().hex if config['name'] == 'bareun' else ''
+        destination = result_dir / (fingerprint.hexdigest() + suffix + '.sqlite')
         db.commit()
-        if destination.is_file() and not report.failed:
+        if destination.is_file() and not report.failed and config['name'] != 'bareun':
             try:
                 cached = load_result(destination)
                 if not cached.report.failed:
@@ -96,7 +101,10 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
             except (sqlite3.Error, ValueError, TypeError, KeyError, IndexError):
                 pass
         progress(0, 0, report.failed)
-        analyzer = create(config['name'], config.get('options', {}))
+        if config['name'] == 'bareun':
+            analyzer = create(config['name'], config.get('options', {}), api_key=api_key)
+        else:
+            analyzer = create(config['name'], config.get('options', {}))
         checkpoint(cancel)
         report.processed = report.failed
         for path, expected in db.execute('SELECT path,digest FROM inputs ORDER BY path'):
@@ -152,6 +160,11 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
         report.cancelled = True
         return MorphResult(report, '', config, [], token_count)
     finally:
+        if analyzer is not None and hasattr(analyzer, 'close'):
+            try:
+                analyzer.close()
+            except Exception:
+                pass
         if db is not None:
             db.close()
         if os.path.exists(temporary):

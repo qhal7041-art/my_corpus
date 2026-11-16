@@ -27,6 +27,8 @@ class Project:
         """Atomic replacement leaves the previous project intact if writing fails."""
         path = Path(filename)
         payload = asdict(self)
+        from .analyzers.registry import public_config
+        payload['analyzer'] = public_config(self.analyzer)
         # Relative paths survive moving a project together with its corpora.
         for role in ("target", "reference"):
             folder = payload[role]["folder"]
@@ -66,6 +68,8 @@ class Project:
             if not isinstance(data.get(key, expected()), expected):
                 raise ValueError(f"{key} 설정 형식이 올바르지 않습니다.")
         analyzer = data.get('analyzer', {})
+        from .analyzers.registry import public_config
+        public_config(analyzer)
         if not isinstance(analyzer.get('name', 'kiwi'), str) or not isinstance(analyzer.get('options', {}), dict):
             raise ValueError('분석기 설정 형식이 올바르지 않습니다.')
         if not isinstance(analyzer.get('options', {}).get('user_dictionary', ''), str):

@@ -4,7 +4,7 @@ import json
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QCheckBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QHeaderView, QProgressBar)
+    QAbstractItemView, QHeaderView, QProgressBar, QLineEdit)
 from .workers import FunctionWorker
 from .analyzers.registry import status
 from .morphology import analyze_corpus, load_result
@@ -51,6 +51,27 @@ class MorphDialog(QDialog):
         self.dictionary.setMaximumHeight(90)
         self.dictionary.setPlaceholderText('제주방언 NNP 5')
         layout.addWidget(self.dictionary)
+        self.key_label = QLabel('바른 API 키 (이 창에서만 사용 · 프로젝트/결과에 저장하지 않음)')
+        layout.addWidget(self.key_label)
+        self.api_key = QLineEdit()
+        self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key.setPlaceholderText('API 키를 직접 입력하세요. env 설정 불필요')
+        self.api_key.textChanged.connect(self.refresh)
+        layout.addWidget(self.api_key)
+        self.bareun_options = []
+        for key, label in [('auto_spacing', '바른: 띄어쓰기 보정'), ('auto_jointing', '바른: 붙여쓰기 보정')]:
+            control = QCheckBox(label)
+            control.setChecked(True)
+            self.bareun_options.append((key, control))
+            layout.addWidget(control)
+        self.server_dicts = QLineEdit()
+        self.server_dicts.setPlaceholderText('바른 서버에 등록한 사전 이름 (쉼표로 구분, 선택 사항)')
+        layout.addWidget(self.server_dicts)
+        self.utagger_version = QComboBox()
+        for variant in ('utagger4', 'utagger3', 'utagger4hj'):
+            self.utagger_version.addItem(variant, variant)
+        self.utagger_version.currentIndexChanged.connect(self.refresh)
+        layout.addWidget(self.utagger_version)
         row = QHBoxLayout()
         self.save_options = QPushButton('설정 저장')
         self.save_options.clicked.connect(self.persist_settings)
@@ -96,6 +117,11 @@ class MorphDialog(QDialog):
         for key, control in self.options:
             control.setChecked(bool(options.get(key, False)))
         self.dictionary.setPlainText(options.get('user_dictionary', ''))
+        for key, control in self.bareun_options:
+            control.setChecked(bool(options.get(key, True)))
+        self.server_dicts.setText(', '.join(options.get('custom_dicts', [])))
+        variant = self.utagger_version.findData(options.get('version', 'utagger4'))
+        self.utagger_version.setCurrentIndex(max(0, variant))
         self.engine.currentIndexChanged.connect(self.refresh)
         self.refresh_results()
         self.refresh()
@@ -103,20 +129,31 @@ class MorphDialog(QDialog):
     def config(self):
         options = {key: control.isChecked() for key, control in self.options}
         options['user_dictionary'] = self.dictionary.toPlainText()
-        return {'name': self.engine.currentData(), 'options': options if self.engine.currentData() == 'kiwi' else {}}
+        name = self.engine.currentData()
+        if name == 'bareun':
+            options = {key: control.isChecked() for key, control in self.bareun_options}
+            options['custom_dicts'] = [value.strip() for value in self.server_dicts.text().split(',') if value.strip()]
+        elif name == 'utagger':
+            options = {'version': self.utagger_version.currentData()}
+        return {'name': name, 'options': options}
 
     def persist_settings(self):
         self.settings_saved.emit(self.config())
 
     def refresh(self):
-        info = status(self.engine.currentData())
+        name = self.engine.currentData()
+        info = status(name, self.config()['options'])
         self.availability.setText(info.instructions)
         kiwi = self.engine.currentData() == 'kiwi'
         for _, control in self.options:
             control.setVisible(kiwi)
         self.dictionary.setVisible(kiwi)
         self.dictionary_label.setVisible(kiwi)
-        self.run_button.setEnabled(not self.thread and info.available and bool(self.source.folder) and self.source.field_path is not None)
+        for control in [self.key_label, self.api_key, self.server_dicts] + [c for _, c in self.bareun_options]:
+            control.setVisible(name == 'bareun')
+        self.utagger_version.setVisible(name == 'utagger')
+        self.run_button.setText('형태소 분석 (바른: 서버 전송·자동 재사용 안 함)' if name == 'bareun' else '형태소 분석 / 같은 데이터·설정 결과 재사용')
+        self.run_button.setEnabled(not self.thread and info.available and (name != 'bareun' or bool(self.api_key.text().strip())) and bool(self.source.folder) and self.source.field_path is not None)
         self.load_button.setEnabled(not self.thread and self.saved_results.count() > 0)
 
     def refresh_results(self):
@@ -132,7 +169,8 @@ class MorphDialog(QDialog):
         self.persist_settings()
         folder, selected = self.source.folder, list(self.source.field_path)
         directory = self.project_file.with_suffix('.results')
-        self.start(lambda cancel, progress: analyze_corpus(folder, selected, config, directory, cancel, progress), True)
+        key = self.api_key.text() if config['name'] == 'bareun' else ''
+        self.start(lambda cancel, progress: analyze_corpus(folder, selected, config, directory, cancel, progress, api_key=key), True)
 
     def open_result(self):
         relative = self.saved_results.currentData()
@@ -157,7 +195,7 @@ class MorphDialog(QDialog):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.finished_job)
         self.thread.finished.connect(self.thread.deleteLater)
-        for control in [self.engine, self.dictionary, self.run_button, self.save_options, self.saved_results, self.load_button] + [c for _, c in self.options]:
+        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.run_button, self.save_options, self.saved_results, self.load_button] + [c for _, c in self.options + self.bareun_options]:
             control.setEnabled(False)
         self.progress.setRange(0, 0)
         self.cancel_button.setEnabled(True)
@@ -203,10 +241,11 @@ class MorphDialog(QDialog):
         self.progress.setRange(0, 1)
         self.progress.setValue(1)
         self.cancel_button.setEnabled(False)
-        for control in [self.engine, self.dictionary, self.save_options, self.saved_results] + [c for _, c in self.options]:
+        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.save_options, self.saved_results] + [c for _, c in self.options + self.bareun_options]:
             control.setEnabled(True)
         self.refresh()
         if self.closing:
+            self.api_key.clear()
             super().reject()
 
     def reject(self):
@@ -214,6 +253,7 @@ class MorphDialog(QDialog):
             self.closing = True
             self.cancel()
         else:
+            self.api_key.clear()
             super().reject()
 
     def closeEvent(self, event):

@@ -45,4 +45,5 @@ class FunctionWorker(QObject):
         except Exception as error:
             self.error.emit(f'{type(error).__name__}: {error}')
         finally:
+            self.function = None
             self.finished.emit()

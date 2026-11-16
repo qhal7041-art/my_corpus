@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
             button.setMinimumHeight(48)
             button.clicked.connect(callback)
             layout.addWidget(button)
-        hint = QLabel("JSON · TXT · Excel 말뭉치 탐색 · Kiwi 형태소 분석\n원본 파일은 수정하지 않습니다.")
+        hint = QLabel("JSON · TXT · Excel 말뭉치 탐색 · 형태소 분석\n원본 파일은 수정하지 않습니다.")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
         layout.addStretch()
@@ -126,7 +126,7 @@ class MainWindow(QMainWindow):
         self.errors.setMaximumHeight(110)
         self.errors.setPlaceholderText("읽기 실패 이유가 여기에 표시됩니다 (최대 100건).")
         layout.addWidget(self.errors)
-        future = QLabel("형태소 분석: Kiwi 지원 · 다음 단계: 연어 / N-gram / 핵심도 → Excel / CSV 내보내기")
+        future = QLabel("형태소 분석: Kiwi · 바른 API · UTagger (설치 상태 확인) · 다음 단계: 연어 / N-gram / 핵심도 → 내보내기")
         future.setStyleSheet("color: #666; padding: 6px")
         layout.addWidget(future)
         self.stack.addWidget(page)
@@ -211,7 +211,7 @@ class MainWindow(QMainWindow):
         self.project.results = [entry for entry in self.project.results
                                 if not (entry.get('type') == 'morphology' and entry.get('path') == relative and entry.get('role') == role)]
         self.project.results.append({'type': 'morphology', 'role': role, 'path': relative,
-            'label': f"Kiwi · {result.report.texts:,}발화 · {Path(result.path).stem[:10]}", 'config': result.config})
+            'label': f"{result.config['name']} · {result.report.texts:,}발화 · {Path(result.path).stem[-10:]}", 'config': result.config})
         self.dirty = True
         self.save_project()
 

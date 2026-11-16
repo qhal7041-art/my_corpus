@@ -27,7 +27,8 @@ def test_real_kiwi_and_user_dictionary():
     assert any(t.form == '코덱스방언연구' and t.pos == 'NNP' for t in result)
     assert any(t.pos.startswith('J') for t in result)
     assert status('kiwi').available
-    assert not status('bareun').available and not status('utagger').available
+    from corpus_app.analyzers.registry import package_version
+    assert status('bareun').available == bool(package_version('bareunpy'))
 
 
 def test_cache_persistence_and_invalidation(tmp_path, monkeypatch):
