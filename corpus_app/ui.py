@@ -82,6 +82,14 @@ class MainWindow(QMainWindow):
         self.morph_button.clicked.connect(self.open_morphology)
         row.addWidget(self.morph_button)
         layout.addLayout(row)
+        analysis_row = QHBoxLayout()
+        self.import_button = QPushButton('이미 분석된 형태소·품사 파일 불러오기…')
+        self.import_button.clicked.connect(self.open_tagged_import)
+        analysis_row.addWidget(self.import_button)
+        self.statistics_button = QPushButton('연어 · N-gram 분석…')
+        self.statistics_button.clicked.connect(self.open_statistics)
+        analysis_row.addWidget(self.statistics_button)
+        layout.addLayout(analysis_row)
         self.folder_label = QLabel()
         self.folder_label.setWordWrap(True)
         layout.addWidget(self.folder_label)
@@ -126,7 +134,7 @@ class MainWindow(QMainWindow):
         self.errors.setMaximumHeight(110)
         self.errors.setPlaceholderText("읽기 실패 이유가 여기에 표시됩니다 (최대 100건).")
         layout.addWidget(self.errors)
-        future = QLabel("형태소 분석: Kiwi · 바른 API · UTagger (설치 상태 확인) · 다음 단계: 연어 / N-gram / 핵심도 → 내보내기")
+        future = QLabel("형태소: Kiwi · 바른 API/로컬 · UTagger · 사전 분석 파일 | 연어 · N-gram 지원 | 다음 단계: 참조 핵심도 · 내보내기")
         future.setStyleSheet("color: #666; padding: 6px")
         layout.addWidget(future)
         self.stack.addWidget(page)
@@ -215,6 +223,44 @@ class MainWindow(QMainWindow):
         self.dirty = True
         self.save_project()
 
+    def open_tagged_import(self):
+        if self.thread or not self.project:
+            return
+        from .analysis_ui import TaggedImportDialog
+        dialog = TaggedImportDialog(self.project, self.project_file, self.role.currentData(), self)
+        dialog.result_saved.connect(self.save_morph_result)
+        dialog.exec()
+
+    def open_statistics(self):
+        if self.thread or not self.project:
+            return
+        from .analysis_ui import StatisticsDialog
+        dialog = StatisticsDialog(self.project, self.project_file, self.role.currentData(), self)
+        dialog.result_saved.connect(self.save_statistics_result)
+        dialog.settings_saved.connect(self.save_statistics_settings)
+        dialog.exec()
+
+    def save_statistics_settings(self, settings):
+        self.project.analysis_settings['statistics'] = settings
+        self.dirty = True
+        self.save_project()
+
+    def save_statistics_result(self, result):
+        relative = os.path.relpath(result.path, self.project_file.parent)
+        role = self.role.currentData()
+        source = Path(result.metadata['source']).resolve()
+        for entry in self.project.results:
+            if entry.get('type') == 'morphology' and (self.project_file.parent / entry['path']).resolve() == source:
+                role = entry.get('role', role)
+                break
+        self.project.results = [entry for entry in self.project.results
+                                if not (entry.get('type') == 'statistics' and entry.get('path') == relative)]
+        self.project.results.append({'type': 'statistics', 'role': role, 'path': relative,
+                                    'label': f"{role} · {result.metadata['kind']} · {result.metadata['result_count']:,}후보 · {Path(result.path).stem[-10:]}",
+                                    'config': result.metadata})
+        self.dirty = True
+        self.save_project()
+
     def source_changed(self):
         if not self.project:
             return
@@ -292,7 +338,7 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
     def set_busy(self, busy):
-        for control in (self.role, self.connect_button, self.scan_button, self.preview_button, self.tree, self.save_button, self.morph_button):
+        for control in (self.role, self.connect_button, self.scan_button, self.preview_button, self.tree, self.save_button, self.morph_button, self.import_button, self.statistics_button):
             control.setEnabled(not busy)
         for action in (self.new_action, self.open_action, self.save_action):
             action.setEnabled(not busy)

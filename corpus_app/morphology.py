@@ -48,6 +48,11 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
     if not folder.is_dir() or selected is None:
         raise ValueError('연결된 폴더와 텍스트 필드를 먼저 선택하세요.')
     config = public_config(config)
+    if config['name'] == 'baropy':
+        from .analyzers.baropy_local import default_model_cache
+        cache = Path(config['options'].get('model_cache') or default_model_cache()).expanduser().resolve()
+        if cache.is_relative_to(folder):
+            raise ValueError('모델 캐시는 원본 말뭉치 폴더 밖에 지정하세요.')
     if not engine_version(config['name']):
         raise ValueError('선택한 분석기의 Python 패키지를 먼저 설치하세요.')
     config = json.loads(pack(config))
@@ -89,10 +94,10 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
             if report.discovered % 25 == 0 or report.discovered == 1:
                 progress(report.discovered, 0, report.failed)
         checkpoint(cancel)
-        suffix = '-' + uuid.uuid4().hex if config['name'] == 'bareun' else ''
+        suffix = '-' + uuid.uuid4().hex if config['name'] in ('bareun', 'baropy') else ''
         destination = result_dir / (fingerprint.hexdigest() + suffix + '.sqlite')
         db.commit()
-        if destination.is_file() and not report.failed and config['name'] != 'bareun':
+        if destination.is_file() and not report.failed and config['name'] not in ('bareun', 'baropy'):
             try:
                 cached = load_result(destination)
                 if not cached.report.failed:
@@ -103,6 +108,8 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
         progress(0, 0, report.failed)
         if config['name'] == 'bareun':
             analyzer = create(config['name'], config.get('options', {}), api_key=api_key)
+        elif config['name'] == 'baropy':
+            analyzer = create(config['name'], config['options'], api_key=api_key, cancel=cancel)
         else:
             analyzer = create(config['name'], config.get('options', {}))
         checkpoint(cancel)
@@ -160,12 +167,15 @@ def analyze_corpus(folder, selected, config, result_dir, cancel=None, progress=N
         report.cancelled = True
         return MorphResult(report, '', config, [], token_count)
     finally:
+        cleanup_failed = False
         if analyzer is not None and hasattr(analyzer, 'close'):
             try:
                 analyzer.close()
             except Exception:
-                pass
+                cleanup_failed = config['name'] == 'baropy'
         if db is not None:
             db.close()
         if os.path.exists(temporary):
             os.unlink(temporary)
+        if cleanup_failed:
+            raise RuntimeError('바른 로컬 서버/임시 등록 정보 정리에 실패했습니다. 모델 캐시의 .corpus-session- 폴더를 확인하세요.') from None

@@ -4,7 +4,7 @@ import json
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QCheckBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QHeaderView, QProgressBar, QLineEdit)
+    QAbstractItemView, QHeaderView, QProgressBar, QLineEdit, QSpinBox)
 from .workers import FunctionWorker
 from .analyzers.registry import status
 from .morphology import analyze_corpus, load_result
@@ -31,7 +31,7 @@ class MorphDialog(QDialog):
         source_label.setWordWrap(True)
         layout.addWidget(source_label)
         self.engine = QComboBox()
-        for label, key in [('Kiwi (로컬)', 'kiwi'), ('바른', 'bareun'), ('UTagger', 'utagger')]:
+        for label, key in [('Kiwi (로컬)', 'kiwi'), ('바른 API', 'bareun'), ('UTagger', 'utagger'), ('바른 로컬 (baropy)', 'baropy')]:
             self.engine.addItem(label, key)
         layout.addWidget(self.engine)
         self.availability = QLabel()
@@ -72,6 +72,22 @@ class MorphDialog(QDialog):
             self.utagger_version.addItem(variant, variant)
         self.utagger_version.currentIndexChanged.connect(self.refresh)
         layout.addWidget(self.utagger_version)
+        from .analyzers.baropy_local import default_model_cache
+        self.local_threads = QSpinBox()
+        self.local_threads.setRange(1, 32)
+        self.local_threads.setValue(2)
+        self.local_threads.setPrefix('로컬 CPU 스레드: ')
+        self.local_sense = QCheckBox('로컬: 동형이의어 어깨번호 포함 (sense)')
+        self.local_nouns = QPlainTextEdit()
+        self.local_nouns.setPlaceholderText('로컬 고유명사 사용자 사전: 한 줄에 한 단어. 예: 제주방언')
+        self.local_nouns.setMaximumHeight(70)
+        self.local_nouns_label = QLabel('바른 로컬 고유명사 사전: 한 줄에 한 단어')
+        self.local_cache = QLineEdit(default_model_cache())
+        self.local_cache_label = QLabel('바른 로컬 모델 캐시 폴더 (원본 말뭉치 폴더 밖)')
+        self.local_cache.setPlaceholderText('모델만 보관할 캐시 폴더 (말뭉치 폴더 밖)')
+        self.local_cache.setToolTip('기본값은 OS 임시 폴더입니다. 필요하면 전용 모델 폴더 경로로 바꾸세요.')
+        for control in (self.local_threads, self.local_sense, self.local_nouns_label, self.local_nouns, self.local_cache_label, self.local_cache):
+            layout.addWidget(control)
         row = QHBoxLayout()
         self.save_options = QPushButton('설정 저장')
         self.save_options.clicked.connect(self.persist_settings)
@@ -122,6 +138,10 @@ class MorphDialog(QDialog):
         self.server_dicts.setText(', '.join(options.get('custom_dicts', [])))
         variant = self.utagger_version.findData(options.get('version', 'utagger4'))
         self.utagger_version.setCurrentIndex(max(0, variant))
+        self.local_threads.setValue(options.get('threads', 2))
+        self.local_sense.setChecked(options.get('sense', False))
+        self.local_nouns.setPlainText(options.get('user_nouns', ''))
+        self.local_cache.setText(options.get('model_cache') or default_model_cache())
         self.engine.currentIndexChanged.connect(self.refresh)
         self.refresh_results()
         self.refresh()
@@ -135,6 +155,9 @@ class MorphDialog(QDialog):
             options['custom_dicts'] = [value.strip() for value in self.server_dicts.text().split(',') if value.strip()]
         elif name == 'utagger':
             options = {'version': self.utagger_version.currentData()}
+        elif name == 'baropy':
+            options = {'threads': self.local_threads.value(), 'sense': self.local_sense.isChecked(),
+                       'user_nouns': self.local_nouns.toPlainText(), 'model_cache': self.local_cache.text().strip()}
         return {'name': name, 'options': options}
 
     def persist_settings(self):
@@ -149,11 +172,16 @@ class MorphDialog(QDialog):
             control.setVisible(kiwi)
         self.dictionary.setVisible(kiwi)
         self.dictionary_label.setVisible(kiwi)
-        for control in [self.key_label, self.api_key, self.server_dicts] + [c for _, c in self.bareun_options]:
+        for control in [self.server_dicts] + [c for _, c in self.bareun_options]:
             control.setVisible(name == 'bareun')
+        self.key_label.setVisible(name in ('bareun', 'baropy'))
+        self.api_key.setVisible(name in ('bareun', 'baropy'))
+        self.key_label.setText('바른 로컬 키: 프로젝트에 저장하지 않음 · SDK 임시 등록 DB는 종료 시 삭제' if name == 'baropy' else '바른 API 키 (이 창에서만 사용 · 프로젝트/결과에 저장하지 않음)')
+        for control in (self.local_threads, self.local_sense, self.local_nouns_label, self.local_nouns, self.local_cache_label, self.local_cache):
+            control.setVisible(name == 'baropy')
         self.utagger_version.setVisible(name == 'utagger')
-        self.run_button.setText('형태소 분석 (바른: 서버 전송·자동 재사용 안 함)' if name == 'bareun' else '형태소 분석 / 같은 데이터·설정 결과 재사용')
-        self.run_button.setEnabled(not self.thread and info.available and (name != 'bareun' or bool(self.api_key.text().strip())) and bool(self.source.folder) and self.source.field_path is not None)
+        self.run_button.setText('형태소 분석 (API 서버 전송)' if name == 'bareun' else '형태소 분석 (로컬 모델·첫 다운로드 가능)' if name == 'baropy' else '형태소 분석 / 같은 데이터·설정 결과 재사용')
+        self.run_button.setEnabled(not self.thread and info.available and (name not in ('bareun', 'baropy') or bool(self.api_key.text().strip())) and bool(self.source.folder) and self.source.field_path is not None)
         self.load_button.setEnabled(not self.thread and self.saved_results.count() > 0)
 
     def refresh_results(self):
@@ -169,7 +197,7 @@ class MorphDialog(QDialog):
         self.persist_settings()
         folder, selected = self.source.folder, list(self.source.field_path)
         directory = self.project_file.with_suffix('.results')
-        key = self.api_key.text() if config['name'] == 'bareun' else ''
+        key = self.api_key.text() if config['name'] in ('bareun', 'baropy') else ''
         self.start(lambda cancel, progress: analyze_corpus(folder, selected, config, directory, cancel, progress, api_key=key), True)
 
     def open_result(self):
@@ -195,7 +223,7 @@ class MorphDialog(QDialog):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.finished_job)
         self.thread.finished.connect(self.thread.deleteLater)
-        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.run_button, self.save_options, self.saved_results, self.load_button] + [c for _, c in self.options + self.bareun_options]:
+        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.run_button, self.save_options, self.saved_results, self.load_button, self.local_threads, self.local_sense, self.local_nouns, self.local_cache] + [c for _, c in self.options + self.bareun_options]:
             control.setEnabled(False)
         self.progress.setRange(0, 0)
         self.cancel_button.setEnabled(True)
@@ -241,7 +269,7 @@ class MorphDialog(QDialog):
         self.progress.setRange(0, 1)
         self.progress.setValue(1)
         self.cancel_button.setEnabled(False)
-        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.save_options, self.saved_results] + [c for _, c in self.options + self.bareun_options]:
+        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.save_options, self.saved_results, self.local_threads, self.local_sense, self.local_nouns, self.local_cache] + [c for _, c in self.options + self.bareun_options]:
             control.setEnabled(True)
         self.refresh()
         if self.closing:

@@ -18,7 +18,7 @@ def engine_version(name='kiwi'):
     if name == 'kiwi':
         engine, model = package_version('kiwipiepy'), package_version('kiwipiepy_model')
         return engine + '/model-' + model if engine and model else None
-    return package_version({'bareun': 'bareunpy', 'utagger': 'pyutagger'}.get(name, name))
+    return package_version({'bareun': 'bareunpy', 'baropy': 'bareun-baropy', 'utagger': 'pyutagger'}.get(name, name))
 
 
 def public_config(config):
@@ -26,11 +26,12 @@ def public_config(config):
         raise ValueError('분석기 설정에는 이름과 옵션만 저장할 수 있습니다. API 키는 전용 입력 칸에 입력하세요.')
     name = config.get('name', 'kiwi')
     allowed = {'kiwi': {'normalize_coda', 'split_complex', 'compatible_jamo', 'user_dictionary'},
-               'bareun': {'auto_spacing', 'auto_jointing', 'custom_dicts'}, 'utagger': {'version'}}
+               'bareun': {'auto_spacing', 'auto_jointing', 'custom_dicts'}, 'utagger': {'version'},
+               'baropy': {'threads', 'sense', 'user_nouns', 'model_cache'}}
     options = config.get('options', {})
     if name not in allowed or not isinstance(options, dict) or set(options) - allowed[name]:
         raise ValueError('지원하지 않는 분석기 설정입니다. API 키는 전용 입력 칸에 입력하세요.')
-    for key in ('normalize_coda', 'split_complex', 'compatible_jamo', 'auto_spacing', 'auto_jointing'):
+    for key in ('normalize_coda', 'split_complex', 'compatible_jamo', 'auto_spacing', 'auto_jointing', 'sense'):
         if key in options and type(options[key]) is not bool:
             raise ValueError('분석 옵션은 참/거짓이어야 합니다.')
     if 'user_dictionary' in options and not isinstance(options['user_dictionary'], str):
@@ -39,6 +40,11 @@ def public_config(config):
         raise ValueError('바른 사전 이름은 문자열 목록이어야 합니다.')
     if name == 'utagger' and options.get('version', 'utagger4') not in ('utagger3', 'utagger4', 'utagger4hj'):
         raise ValueError('지원하지 않는 UTagger 버전입니다.')
+    if name == 'baropy':
+        if type(options.get('threads', 2)) is not int or not 1 <= options.get('threads', 2) <= 32:
+            raise ValueError('로컬 분석 스레드는 1~32의 정수여야 합니다.')
+        if any(not isinstance(options.get(key, ''), str) for key in ('user_nouns', 'model_cache')):
+            raise ValueError('로컬 사전과 모델 캐시 경로는 문자열이어야 합니다.')
     return {'name': name, 'options': dict(options)}
 
 
@@ -66,6 +72,11 @@ def status(name, options=None):
             ('SDK 설치됨. API 키를 아래에 직접 입력하세요. 원문이 https://api.bareun.ai 로 전송되며 API 이용 한도/요금이 적용될 수 있습니다. '
              '서버 사용자 사전은 등록된 이름만 적용합니다. 키·연결 유효성은 분석 시 확인합니다.') if installed else
             'bareunpy 미설치: python -m pip install -e ".[bareun]". API 키 발급: https://bareun.ai/analyze')
+    if name == 'baropy':
+        return AnalyzerStatus('바른 로컬', bool(installed),
+            (f'baropy {installed} 설치됨. PC 내 숨은 로컬 서버로 분석합니다. API 키가 필요하며 첫 실행에는 모델 다운로드/키 등록 통신이 필요합니다. '
+             'SDK 등록 DB·로그는 별도 임시 폴더에 생성하고 종료 시 삭제합니다. 모델만 캐시에 보관합니다.') if installed else
+            'bareun-baropy 미설치 또는 지원 wheel 없음: python -m pip install -e ".[baropy]". Python 3.10+, 지원 OS/CPU가 필요합니다.')
     if name != 'utagger':
         return AnalyzerStatus(name, False, '알 수 없는 분석기입니다.')
     root = utagger_root(options.get('version', 'utagger4'))
@@ -78,6 +89,8 @@ def status(name, options=None):
 
 
 def model_identity(name, options, cancel):
+    if name == 'baropy':
+        return 'bundled-server-3.4.0/model-not-pinned'
     if name != 'utagger':
         return 'cong' if name == 'kiwi' else 'hosted-api/model-version-not-exposed'
     from ..json_corpus import checkpoint
@@ -96,13 +109,16 @@ def model_identity(name, options, cancel):
     return options.get('version', 'utagger4') + '/' + digest.hexdigest()
 
 
-def create(name, options, *, api_key=''):
+def create(name, options, *, api_key='', cancel=None):
     if name == 'kiwi':
         from .kiwi import KiwiAnalyzer
         return KiwiAnalyzer(options)
     if name == 'bareun':
         from .bareun import BareunAnalyzer
         return BareunAnalyzer(options, api_key)
+    if name == 'baropy':
+        from .baropy_local import BaropyAnalyzer
+        return BaropyAnalyzer(options, api_key, cancel)
     if name == 'utagger':
         from .utagger import UTaggerAnalyzer
         return UTaggerAnalyzer(options)

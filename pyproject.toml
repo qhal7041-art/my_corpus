@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "korean-corpus-desktop"
-version = "0.3.0"
+version = "0.4.0"
 description = "한국어 JSON 말뭉치 탐색 및 연구 프로젝트 관리"
 requires-python = ">=3.10"
 dependencies = ["PyQt6>=6.7,<7", "openpyxl>=3.1,<4", "xlrd>=2,<3"]
@@ -13,6 +13,7 @@ dependencies = ["PyQt6>=6.7,<7", "openpyxl>=3.1,<4", "xlrd>=2,<3"]
 test = ["pytest>=8,<10"]
 morphology = ["kiwipiepy==0.24.1", "kiwipiepy_model==0.24.0"]
 bareun = ["bareunpy==2.1.0"]
+baropy = ["bareun-baropy==3.4.1"]
 utagger = ["pyutagger==1.0.1.1031"]
 
 [project.scripts]
