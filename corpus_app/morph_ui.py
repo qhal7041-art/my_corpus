@@ -1,0 +1,225 @@
+"""Morphology UI; no model initialization, corpus IO or SQLite IO on UI thread."""
+from pathlib import Path
+import json
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+    QCheckBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QHeaderView, QProgressBar)
+from .workers import FunctionWorker
+from .analyzers.registry import status
+from .morphology import analyze_corpus, load_result
+
+
+class MorphDialog(QDialog):
+    settings_saved = pyqtSignal(dict)
+    result_saved = pyqtSignal(object)
+
+    def __init__(self, project, project_file, role, parent=None):
+        super().__init__(parent)
+        self.project = project
+        self.project_file = Path(project_file)
+        self.role = role
+        self.source = getattr(project, role)
+        self.thread = None
+        self.worker = None
+        self.closing = False
+        self.last_result = None
+        self.setWindowTitle('형태소 분석 — ' + ('대상 말뭉치' if role == 'target' else '참조 말뭉치'))
+        self.resize(1000, 760)
+        layout = QVBoxLayout(self)
+        source_label = QLabel(f'원본: {self.source.folder}\n발화별로 분석합니다. 원문 전처리 없음 · 품사 필터 없음 · 발화 경계 유지')
+        source_label.setWordWrap(True)
+        layout.addWidget(source_label)
+        self.engine = QComboBox()
+        for label, key in [('Kiwi (로컬)', 'kiwi'), ('바른', 'bareun'), ('UTagger', 'utagger')]:
+            self.engine.addItem(label, key)
+        layout.addWidget(self.engine)
+        self.availability = QLabel()
+        self.availability.setWordWrap(True)
+        layout.addWidget(self.availability)
+        self.options = []
+        for key, label in [('normalize_coda', '받침 정규화 (normalize_coda)'),
+                           ('split_complex', '복합 형태소 분리 (split_complex)'),
+                           ('compatible_jamo', '호환 자모 출력 (compatible_jamo)')]:
+            control = QCheckBox(label)
+            self.options.append((key, control))
+            layout.addWidget(control)
+        self.dictionary_label = QLabel('사용자 사전: 한 줄에 형태소 품사 [점수]. 예: 제주방언 NNP 5. # 주석 허용. 내용은 프로젝트에 저장됩니다.')
+        self.dictionary_label.setWordWrap(True)
+        layout.addWidget(self.dictionary_label)
+        self.dictionary = QPlainTextEdit()
+        self.dictionary.setMaximumHeight(90)
+        self.dictionary.setPlaceholderText('제주방언 NNP 5')
+        layout.addWidget(self.dictionary)
+        row = QHBoxLayout()
+        self.save_options = QPushButton('설정 저장')
+        self.save_options.clicked.connect(self.persist_settings)
+        row.addWidget(self.save_options)
+        self.run_button = QPushButton('형태소 분석 / 같은 데이터·설정 결과 재사용')
+        self.run_button.clicked.connect(self.run_analysis)
+        row.addWidget(self.run_button)
+        layout.addLayout(row)
+        row = QHBoxLayout()
+        self.saved_results = QComboBox()
+        row.addWidget(self.saved_results, 1)
+        self.load_button = QPushButton('저장한 결과 열기')
+        self.load_button.clicked.connect(self.open_result)
+        row.addWidget(self.load_button)
+        layout.addLayout(row)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(['원문 (최대 500자)', '형태소/품사 (앞 100개·1,500자)', '원본 파일', '발화 ID'])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 220)
+        self.table.setColumnWidth(2, 220)
+        layout.addWidget(self.table, 1)
+        self.summary = QLabel('설정을 확인한 뒤 분석하세요. 모델 초기화는 시간이 걸릴 수 있습니다.')
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        row = QHBoxLayout()
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1)
+        row.addWidget(self.progress)
+        self.cancel_button = QPushButton('취소')
+        self.cancel_button.clicked.connect(self.cancel)
+        self.cancel_button.setEnabled(False)
+        row.addWidget(self.cancel_button)
+        layout.addLayout(row)
+        self.details = QPlainTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setMaximumHeight(140)
+        layout.addWidget(self.details)
+        config = project.analyzer
+        index = self.engine.findData(config.get('name', 'kiwi'))
+        self.engine.setCurrentIndex(max(0, index))
+        options = config.get('options', {})
+        for key, control in self.options:
+            control.setChecked(bool(options.get(key, False)))
+        self.dictionary.setPlainText(options.get('user_dictionary', ''))
+        self.engine.currentIndexChanged.connect(self.refresh)
+        self.refresh_results()
+        self.refresh()
+
+    def config(self):
+        options = {key: control.isChecked() for key, control in self.options}
+        options['user_dictionary'] = self.dictionary.toPlainText()
+        return {'name': self.engine.currentData(), 'options': options if self.engine.currentData() == 'kiwi' else {}}
+
+    def persist_settings(self):
+        self.settings_saved.emit(self.config())
+
+    def refresh(self):
+        info = status(self.engine.currentData())
+        self.availability.setText(info.instructions)
+        kiwi = self.engine.currentData() == 'kiwi'
+        for _, control in self.options:
+            control.setVisible(kiwi)
+        self.dictionary.setVisible(kiwi)
+        self.dictionary_label.setVisible(kiwi)
+        self.run_button.setEnabled(not self.thread and info.available and bool(self.source.folder) and self.source.field_path is not None)
+        self.load_button.setEnabled(not self.thread and self.saved_results.count() > 0)
+
+    def refresh_results(self):
+        self.saved_results.clear()
+        for entry in self.project.results:
+            if entry.get('type') == 'morphology' and entry.get('role') == self.role:
+                self.saved_results.addItem(entry.get('label', entry['path']), entry['path'])
+
+    def run_analysis(self):
+        if self.thread:
+            return
+        config = self.config()
+        self.persist_settings()
+        folder, selected = self.source.folder, list(self.source.field_path)
+        directory = self.project_file.with_suffix('.results')
+        self.start(lambda cancel, progress: analyze_corpus(folder, selected, config, directory, cancel, progress), True)
+
+    def open_result(self):
+        relative = self.saved_results.currentData()
+        if relative and not self.thread:
+            path = self.project_file.parent / relative
+            self.start(lambda cancel, progress: load_result(path), False)
+
+    def start(self, function, save):
+        self.last_result = None
+        self.should_save = save
+        self.table.setRowCount(0)
+        self.details.clear()
+        self.summary.setText('입력 내용 확인 → 모델 초기화 → 발화별 분석. 같은 입력은 저장 결과를 재사용합니다.')
+        self.thread = QThread(self)
+        self.worker = FunctionWorker(function)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.on_progress)
+        self.worker.result.connect(self.on_result)
+        self.worker.error.connect(self.on_error)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.finished_job)
+        self.thread.finished.connect(self.thread.deleteLater)
+        for control in [self.engine, self.dictionary, self.run_button, self.save_options, self.saved_results, self.load_button] + [c for _, c in self.options]:
+            control.setEnabled(False)
+        self.progress.setRange(0, 0)
+        self.cancel_button.setEnabled(True)
+        self.thread.start()
+
+    def on_progress(self, processed, success, failed):
+        self.summary.setText(f'입력 확인/분석 진행 {processed:,}파일 · 분석 성공 {success:,} · 실패 {failed:,} (분석 시작 시 건수 재설정)')
+
+    def on_error(self, message):
+        self.summary.setText('분석/결과 열기 실패. 미완료 결과는 저장하지 않았습니다.')
+        self.details.setPlainText(message)
+
+    def on_result(self, result):
+        self.last_result = result
+        report = result.report
+        if report.cancelled:
+            self.summary.setText(f'취소됨: {report.processed:,}파일, {report.texts:,}발화 처리. 부분 결과는 저장하지 않았습니다.')
+            return
+        self.summary.setText(f'{"재사용" if result.reused else "완료 / 저장 당시 결과"} · 성공 {report.succeeded:,}파일 · 실패 {report.failed:,} · '
+                             f'발화 {report.texts:,} · 형태소 {result.tokens:,} · 누락 분기 {report.missing:,} · 비문자열 {report.non_string:,} · 빈 배열 {report.empty_arrays:,}')
+        self.table.setRowCount(len(result.preview))
+        for index, row in enumerate(result.preview):
+            text, source, utterance_id, tokens = row
+            for column, value in enumerate((text, tokens, source, utterance_id)):
+                self.table.setItem(index, column, QTableWidgetItem(value))
+        details = '저장된 결과의 설정 (위 편집 중인 설정과 다를 수 있음):\n' + json.dumps(result.config, ensure_ascii=False, indent=2)
+        details += '\n결과 파일: ' + result.path
+        details += '\n' + '\n'.join(f'{path}: {reason}' for path, reason in report.errors)
+        self.details.setPlainText(details)
+        if self.should_save:
+            self.result_saved.emit(result)
+            self.refresh_results()
+
+    def cancel(self):
+        if self.worker:
+            self.worker.cancel.set()
+            self.cancel_button.setEnabled(False)
+            self.summary.setText('취소 요청됨. 현재 모델 초기화/발화 분석이 끝나면 중단합니다.')
+
+    def finished_job(self):
+        self.thread = None
+        self.worker = None
+        self.progress.setRange(0, 1)
+        self.progress.setValue(1)
+        self.cancel_button.setEnabled(False)
+        for control in [self.engine, self.dictionary, self.save_options, self.saved_results] + [c for _, c in self.options]:
+            control.setEnabled(True)
+        self.refresh()
+        if self.closing:
+            super().reject()
+
+    def reject(self):
+        if self.thread:
+            self.closing = True
+            self.cancel()
+        else:
+            super().reject()
+
+    def closeEvent(self, event):
+        if self.thread:
+            self.closing = True
+            self.cancel()
+            event.ignore()
+        else:
+            super().closeEvent(event)

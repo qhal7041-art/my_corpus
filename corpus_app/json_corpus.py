@@ -10,6 +10,8 @@ import json
 import os
 import re
 import time
+from datetime import date, time as datetime_time
+from .input_formats import documents, SUPPORTED_SUFFIXES
 
 MAX_SCHEMA_FIELDS = 10000
 MAX_PREVIEW = 100
@@ -39,6 +41,8 @@ def display_path(path):
 
 
 def value_type(value):
+    if isinstance(value, (date, datetime_time)):
+        return 'datetime'
     if value is None:
         return "null"
     if isinstance(value, bool):
@@ -103,7 +107,7 @@ def json_files(folder, report, cancel):
         directories.sort()
         for name in sorted(files):
             checkpoint(cancel)
-            if name.lower().endswith(".json"):
+            if Path(name).suffix.lower() in SUPPORTED_SUFFIXES:
                 path = Path(root) / name
                 report.discovered += 1
                 yield path
@@ -208,20 +212,39 @@ def process_corpus(folder, cancel=None, progress=None, selected=None):
     try:
         for path in json_files(folder, report, cancel):
             checkpoint(cancel)
+            counters_before = {key: getattr(report, key) for key in
+                               ('texts', 'missing', 'missing_files', 'non_string', 'empty_arrays')}
+            preview_before = len(report.preview)
             try:
-                document = read_json(path)
-                checkpoint(cancel)
-                if selected is None:
-                    report.schema_limited |= inspect_document(document, report.fields, cancel)
-                else:
-                    for row in extract_document(document, selected, path, report, cancel):
-                        report.texts += 1
-                        if len(report.preview) < MAX_PREVIEW:
-                            # Preview never retains complete very long utterances.
-                            report.preview.append({**row, "text": row["text"][:500]})
-                del document
+                file_fields = {}
+                missing_files_before = report.missing_files
+                for document in documents(path, cancel):
+                    checkpoint(cancel)
+                    if selected is None:
+                        report.schema_limited |= inspect_document(document, file_fields, cancel)
+                    else:
+                        for row in extract_document(document, selected, path, report, cancel):
+                            report.texts += 1
+                            if len(report.preview) < MAX_PREVIEW:
+                                report.preview.append({**row, "text": row["text"][:500]})
+                    del document
+                report.missing_files = missing_files_before + int(report.missing_files > missing_files_before)
+                for field_path, info in file_fields.items():
+                    if field_path not in report.fields:
+                        if len(report.fields) >= MAX_SCHEMA_FIELDS:
+                            report.schema_limited = True
+                            continue
+                        report.fields[field_path] = FieldInfo(field_path)
+                    global_info = report.fields[field_path]
+                    global_info.types.update(info.types)
+                    for kind, sample in info.examples.items():
+                        global_info.examples.setdefault(kind, sample)
+                    global_info.files += 1
                 report.succeeded += 1
             except (OSError, UnicodeError, ValueError, RecursionError) as error:
+                for key, value in counters_before.items():
+                    setattr(report, key, value)
+                del report.preview[preview_before:]
                 report.error(path, f"{type(error).__name__}: {error}")
             report.processed += 1
             now = time.monotonic()

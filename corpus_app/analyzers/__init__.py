@@ -1,4 +1,4 @@
-"""Extension boundary for real analyzer adapters (not implemented in stage 1).
+"""Shared data types for analyzer adapters.
 
 UI must never claim an engine is usable solely because it appears in this list.
 Future adapters must probe their runtime and expose only supported options.

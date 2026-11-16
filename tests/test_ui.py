@@ -185,3 +185,61 @@ def test_close_during_scan_cancels_thread(tmp_path):
     wait(app, lambda: window.thread is None)
     assert window.last_report.cancelled
     assert not window.isVisible()
+
+
+def test_morph_dialog_real_analysis_save_reopen_and_cancel(tmp_path):
+    from corpus_app.morph_ui import MorphDialog
+    from unittest.mock import patch
+    app = QApplication.instance()
+    folder = tmp_path / 'corpus'
+    generate(folder, 40)
+    filename = tmp_path / 'morph.corpusproj'
+    Project('형태소', target=CorpusSource(str(folder), ['utterances', None, 'text'])).save(filename)
+    window = MainWindow()
+    assert window.load_project(filename)
+    wait(app, lambda: window.thread is None and window.job_kind == 'extract' and window.last_report is not None)
+    dialog = MorphDialog(window.project, filename, 'target', window)
+    dialog.settings_saved.connect(window.save_analyzer_settings)
+    dialog.result_saved.connect(window.save_morph_result)
+    dialog.show()
+    # Unsupported engines show requirements and hide Kiwi-only options.
+    dialog.engine.setCurrentIndex(1)
+    assert not dialog.run_button.isEnabled()
+    assert not dialog.dictionary.isVisible()
+    dialog.engine.setCurrentIndex(0)
+    dialog.dictionary.setPlainText('코덱스방언연구 NNP 100')
+    ticks = []
+    timer = QTimer()
+    timer.setInterval(5)
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start()
+    dialog.run_button.click()
+    QTimer.singleShot(10, dialog.cancel_button.click)
+    wait(app, lambda: dialog.thread is None)
+    assert dialog.last_result.report.cancelled
+    assert not window.project.results
+    assert not list(filename.with_suffix('.results').glob('*.tmp'))
+    dialog.run_button.click()
+    wait(app, lambda: dialog.thread is None)
+    assert dialog.last_result.report.texts > 0 and dialog.last_result.tokens > 0
+    assert dialog.last_result.report.failed == 1
+    assert dialog.table.rowCount() == 100
+    assert len(ticks) > 5
+    timer.stop()
+    dialog.close()
+    saved = Project.load(filename)
+    assert saved.analyzer['options']['user_dictionary'] == '코덱스방언연구 NNP 100'
+    assert saved.results[0]['type'] == 'morphology'
+    reopened = MorphDialog(saved, filename, 'target')
+    assert reopened.saved_results.count() == 1
+    assert reopened.dictionary.toPlainText() == '코덱스방언연구 NNP 100'
+    # Viewing a saved result must not initialize an engine, even with missing raw data.
+    import shutil
+    shutil.rmtree(folder)
+    with patch('corpus_app.morphology.create', side_effect=AssertionError('must not analyze')):
+        reopened.load_button.click()
+        wait(app, lambda: reopened.thread is None)
+    assert reopened.last_result.tokens == dialog.last_result.tokens
+    assert reopened.table.rowCount() == 100
+    reopened.close()
+    window.close()

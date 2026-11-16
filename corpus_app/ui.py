@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from PyQt6.QtCore import Qt, QThread, QTimer
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -50,7 +51,7 @@ class MainWindow(QMainWindow):
             button.setMinimumHeight(48)
             button.clicked.connect(callback)
             layout.addWidget(button)
-        hint = QLabel("1단계: 프로젝트 관리 · JSON 구조 탐색 · 분석 텍스트 선택\n원본 JSON은 수정하지 않습니다.")
+        hint = QLabel("JSON · TXT · Excel 말뭉치 탐색 · Kiwi 형태소 분석\n원본 파일은 수정하지 않습니다.")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
         layout.addStretch()
@@ -77,6 +78,9 @@ class MainWindow(QMainWindow):
         self.save_button = QPushButton("프로젝트 저장")
         self.save_button.clicked.connect(self.save_project)
         row.addWidget(self.save_button)
+        self.morph_button = QPushButton("형태소 분석…")
+        self.morph_button.clicked.connect(self.open_morphology)
+        row.addWidget(self.morph_button)
         layout.addLayout(row)
         self.folder_label = QLabel()
         self.folder_label.setWordWrap(True)
@@ -104,7 +108,7 @@ class MainWindow(QMainWindow):
         self.preview_button.clicked.connect(self.extract)
         self.preview_button.setEnabled(False)
         layout.addWidget(self.preview_button)
-        self.summary = QLabel("폴더를 연결하면 모든 JSON을 파일별로 탐색합니다.")
+        self.summary = QLabel("폴더를 연결하면 JSON · TXT · Excel을 파일별로 탐색합니다.")
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
         row = QHBoxLayout()
@@ -122,7 +126,7 @@ class MainWindow(QMainWindow):
         self.errors.setMaximumHeight(110)
         self.errors.setPlaceholderText("읽기 실패 이유가 여기에 표시됩니다 (최대 100건).")
         layout.addWidget(self.errors)
-        future = QLabel("다음 단계: 형태소 분석 → 연어 / N-gram / 핵심도 → Excel / CSV 내보내기 (현재 미구현)")
+        future = QLabel("형태소 분석: Kiwi 지원 · 다음 단계: 연어 / N-gram / 핵심도 → Excel / CSV 내보내기")
         future.setStyleSheet("color: #666; padding: 6px")
         layout.addWidget(future)
         self.stack.addWidget(page)
@@ -187,6 +191,30 @@ class MainWindow(QMainWindow):
     def current_source(self):
         return getattr(self.project, self.role.currentData())
 
+    def open_morphology(self):
+        if self.thread or not self.project:
+            return
+        from .morph_ui import MorphDialog
+        dialog = MorphDialog(self.project, self.project_file, self.role.currentData(), self)
+        dialog.settings_saved.connect(self.save_analyzer_settings)
+        dialog.result_saved.connect(self.save_morph_result)
+        dialog.exec()
+
+    def save_analyzer_settings(self, config):
+        self.project.analyzer = config
+        self.dirty = True
+        self.save_project()
+
+    def save_morph_result(self, result):
+        relative = os.path.relpath(result.path, self.project_file.parent)
+        role = self.role.currentData()
+        self.project.results = [entry for entry in self.project.results
+                                if not (entry.get('type') == 'morphology' and entry.get('path') == relative and entry.get('role') == role)]
+        self.project.results.append({'type': 'morphology', 'role': role, 'path': relative,
+            'label': f"Kiwi · {result.report.texts:,}발화 · {Path(result.path).stem[:10]}", 'config': result.config})
+        self.dirty = True
+        self.save_project()
+
     def source_changed(self):
         if not self.project:
             return
@@ -209,7 +237,7 @@ class MainWindow(QMainWindow):
         self.scan_button.setEnabled(not self.thread and bool(source.folder))
 
     def connect_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "JSON 말뭉치 폴더", self.current_source().folder)
+        folder = QFileDialog.getExistingDirectory(self, "말뭉치 폴더 (JSON / TXT / XLSX / XLS)", self.current_source().folder)
         if folder:
             self.current_source().folder = str(Path(folder).resolve())
             self.dirty = True
@@ -264,7 +292,7 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
     def set_busy(self, busy):
-        for control in (self.role, self.connect_button, self.scan_button, self.preview_button, self.tree, self.save_button):
+        for control in (self.role, self.connect_button, self.scan_button, self.preview_button, self.tree, self.save_button, self.morph_button):
             control.setEnabled(not busy)
         for action in (self.new_action, self.open_action, self.save_action):
             action.setEnabled(not busy)
@@ -300,7 +328,7 @@ class MainWindow(QMainWindow):
             if report.schema_limited:
                 summary += " | 필드 10,000개 제한 도달: 일부 구조 생략"
             if not report.discovered:
-                summary += " | JSON 파일이 없습니다."
+                summary += " | 지원하는 JSON / TXT / XLSX / XLS 파일이 없습니다."
         else:
             summary += (f"\n문자열 {report.texts:,}건 · 누락 분기 {report.missing:,}건 ({report.missing_files:,}개 파일)"
                         f" · 비문자열 {report.non_string:,}건 · 빈 배열 {report.empty_arrays:,}개"

@@ -65,5 +65,13 @@ class Project:
         for key, expected in (("analyzer", dict), ("analysis_settings", dict), ("results", list)):
             if not isinstance(data.get(key, expected()), expected):
                 raise ValueError(f"{key} 설정 형식이 올바르지 않습니다.")
+        analyzer = data.get('analyzer', {})
+        if not isinstance(analyzer.get('name', 'kiwi'), str) or not isinstance(analyzer.get('options', {}), dict):
+            raise ValueError('분석기 설정 형식이 올바르지 않습니다.')
+        if not isinstance(analyzer.get('options', {}).get('user_dictionary', ''), str):
+            raise ValueError('사용자 사전은 문자열이어야 합니다.')
+        for entry in data.get('results', []):
+            if not isinstance(entry, dict) or (entry.get('type') == 'morphology' and not isinstance(entry.get('path'), str)):
+                raise ValueError('분석 결과 목록 형식이 올바르지 않습니다.')
         return cls(name=data["name"], **sources, analyzer=data.get("analyzer", {}),
                    analysis_settings=data.get("analysis_settings", {}), results=data.get("results", []))
