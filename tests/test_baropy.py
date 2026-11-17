@@ -84,7 +84,15 @@ def test_real_baropy_sdk_child_registration_analysis_release(tmp_path):
         assert (tmp_path / 'var' / 'api-keys.db.pb').is_file()
         assert 'fixture-secret' not in (tmp_path / 'config' / 'bareun.json').read_text()
     finally:
-        engine.release()
+        # SDK release stops the server but leaves its stdout pipe/HTTP
+        # connection to GC. This direct-SDK fixture owns those handles.
+        child = engine._child
+        try:
+            engine.release()
+        finally:
+            if child is not None and child._proc is not None and child._proc.stdout is not None:
+                child._proc.stdout.close()
+            engine._drop_conn()
     assert not engine.is_loaded
 
 

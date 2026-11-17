@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from .workers import FunctionWorker
 from .tagged_import import import_tagged, import_database
 from .statistics.analysis import analyze_statistics, load_statistics
+from .statistics.keyness import analyze_keyness
 
 
 class JobDialog(QDialog):
@@ -156,8 +157,12 @@ class TaggedImportDialog(JobDialog):
         layout.addWidget(self.run_button)
         self.table = result_table(['재구성 텍스트 / 저장된 원문', '형태소/품사', '원본 파일', '발화 ID'])
         layout.addWidget(self.table, 1)
+        self.export_button = QPushButton('불러온 전체 형태소 결과 내보내기…')
+        self.export_button.clicked.connect(self.open_export)
+        self.export_path = None
+        layout.addWidget(self.export_button)
         self.job_footer(layout)
-        self.inputs = [self.mode, self.plus_delimited, self.choose, self.path, self.form, self.pos, self.id, self.run_button]
+        self.inputs = [self.mode, self.plus_delimited, self.choose, self.path, self.form, self.pos, self.id, self.run_button, self.export_button]
         self.refresh()
 
     def refresh(self):
@@ -170,6 +175,7 @@ class TaggedImportDialog(JobDialog):
             widget.setVisible(visible)
             self.mapping_labels[index].setVisible(visible)
         self.run_button.setEnabled(not self.thread and bool(self.files))
+        self.export_button.setEnabled(not self.thread and self.export_path is not None)
 
     def choose_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, '이미 분석된 파일 선택', '',
@@ -217,6 +223,12 @@ class TaggedImportDialog(JobDialog):
         self.details.setPlainText(json.dumps(result.config, ensure_ascii=False, indent=2) + '\n' +
                                   '\n'.join(f'{path}: {reason}' for path, reason in report.errors))
         self.result_saved.emit(result)
+        self.export_path = result.path
+
+    def open_export(self):
+        if self.export_path and not self.thread:
+            from .export_ui import ExportDialog
+            ExportDialog(self.export_path, self, morphology=True).exec()
 
 
 class StatisticsDialog(JobDialog):
@@ -227,7 +239,8 @@ class StatisticsDialog(JobDialog):
         super().__init__(parent)
         self.project, self.project_file, self.role = project, Path(project_file), role
         self.current_result_path = None
-        self.setWindowTitle('연어 · N-gram 분석')
+        self.displayed_kind = None
+        self.setWindowTitle('연어 · N-gram · 참조 핵심도 분석')
         self.resize(1200, 800)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel('저장된 형태소 결과 또는 이미 분석된 파일을 불러온 결과를 선택하세요. 분석기는 다시 실행하지 않습니다.'))
@@ -239,12 +252,29 @@ class StatisticsDialog(JobDialog):
                     preferred = self.source.count()
                 self.source.addItem(f"[{entry.get('role', '')}] {entry.get('label', entry['path'])}", entry['path'])
         self.source.setCurrentIndex(preferred)
+        self.source_label = QLabel('형태소 분석 결과')
+        layout.addWidget(self.source_label)
         layout.addWidget(self.source)
+        self.reference_label = QLabel('참조 말뭉치 형태소 결과 (대상과 같은 분석기·사전·전처리 필요)')
+        self.reference = QComboBox()
+        self.reference.addItem('참조 결과를 선택하세요', None)
+        reference_preferred = 0
+        for entry in project.results:
+            if entry.get('type') == 'morphology':
+                self.reference.addItem(f"[{entry.get('role', '')}] {entry.get('label', entry['path'])}", entry['path'])
+                if entry.get('role') == 'reference':
+                    reference_preferred = self.reference.count() - 1
+        self.reference.setCurrentIndex(reference_preferred)
+        layout.addWidget(self.reference_label)
+        layout.addWidget(self.reference)
+        self.confirm_external = QCheckBox('사전 분석/버전 미고정 모델의 분석 방식·품사 체계·전처리·사전이 같음을 확인')
+        layout.addWidget(self.confirm_external)
         row = QHBoxLayout()
         self.kind = QComboBox()
         self.kind.addItem('N-gram 빈도', 'ngram')
         self.kind.addItem('연어 (중심어 지정 / 전체 쌍)', 'collocation')
-        self.kind.currentIndexChanged.connect(self.refresh)
+        self.kind.addItem('참조 말뭉치 N-gram 핵심도', 'keyness')
+        self.kind.currentIndexChanged.connect(self.kind_changed)
         row.addWidget(self.kind)
         self.pos = QLineEdit()
         self.pos.setPlaceholderText('품사 접두어 필터 (예: NN*,VV · 비우면 전체)')
@@ -259,6 +289,10 @@ class StatisticsDialog(JobDialog):
         self.include_pos = QCheckBox('N-gram에 품사 포함')
         layout.addWidget(self.n)
         layout.addWidget(self.include_pos)
+        self.keyness_metric = QComboBox()
+        self.keyness_metric.addItem('로그 우도비 (G²)', 'G²')
+        self.keyness_metric.addItem('피어슨 카이제곱 (χ²)', 'χ²')
+        layout.addWidget(self.keyness_metric)
         self.center = QLineEdit()
         self.center.setPlaceholderText('중심 형태소 (비우면 관찰된 전체 형태소 쌍)')
         layout.addWidget(self.center)
@@ -294,11 +328,17 @@ class StatisticsDialog(JobDialog):
         row.addWidget(self.view_button)
         layout.addLayout(row)
         self.table = result_table([])
+        self.low_only = QCheckBox('핵심도: 기대빈도 5 미만 항목만 조회 (정렬/표시 적용)')
+        self.low_only.setVisible(False)
+        layout.addWidget(self.low_only)
         layout.addWidget(self.table, 1)
+        self.export_button = QPushButton('표시 행 제한 없이 전체 통계 내보내기…')
+        self.export_button.clicked.connect(self.open_export)
+        layout.addWidget(self.export_button)
         self.job_footer(layout)
         self.inputs = [self.source, self.kind, self.pos, self.cross, self.n, self.include_pos, self.center,
                        self.left, self.right, self.minimum, self.metric, self.run_button, self.saved, self.open_button,
-                       self.sort, self.limit, self.view_button]
+                       self.sort, self.limit, self.view_button, self.reference, self.confirm_external, self.keyness_metric, self.export_button, self.low_only]
         settings = project.analysis_settings.get('statistics', {})
         self.kind.setCurrentIndex(max(0, self.kind.findData(settings.get('kind', 'ngram'))))
         self.pos.setText(settings.get('pos', ''))
@@ -310,20 +350,46 @@ class StatisticsDialog(JobDialog):
         self.right.setValue(settings.get('right', 2))
         self.minimum.setValue(settings.get('minimum', 2))
         self.metric.setCurrentText(settings.get('metric', 'MI'))
+        self.keyness_metric.setCurrentIndex(max(0, self.keyness_metric.findData(settings.get('metric', 'G²'))))
+        target_index = self.source.findData(settings.get('target_result'))
+        reference_index = self.reference.findData(settings.get('reference_result'))
+        if target_index >= 0:
+            self.source.setCurrentIndex(target_index)
+        if reference_index > 0:
+            self.reference.setCurrentIndex(reference_index)
+        self.confirm_external.setChecked(settings.get('confirm_external', False) and target_index >= 0 and reference_index > 0)
+        self.source.currentIndexChanged.connect(self.pair_changed)
+        self.reference.currentIndexChanged.connect(self.pair_changed)
         self.refresh_saved()
         self.refresh()
 
     def refresh(self):
-        ngram = self.kind.currentData() == 'ngram'
+        kind = self.kind.currentData()
+        ngram, keyness = kind in ('ngram', 'keyness'), kind == 'keyness'
         self.n.setVisible(ngram)
         self.include_pos.setVisible(ngram)
         for control in (self.center, self.left, self.right, self.minimum, self.metric):
             control.setVisible(not ngram)
-        self.run_button.setEnabled(not self.thread and self.source.count() > 0)
+        self.source_label.setText('대상 말뭉치 형태소 결과' if keyness else '형태소 분석 결과')
+        for widget in (self.reference, self.reference_label, self.confirm_external, self.keyness_metric):
+            widget.setVisible(keyness)
+        self.sort.setItemText(0, '전체 결과: 대상 빈도순' if keyness else '전체 결과: 빈도순')
+        self.run_button.setEnabled(not self.thread and self.source.count() > 0 and (not keyness or self.reference.currentData() is not None))
         self.open_button.setEnabled(not self.thread and self.saved.count() > 0)
         self.view_button.setEnabled(not self.thread and self.current_result_path is not None)
+        self.export_button.setEnabled(not self.thread and self.current_result_path is not None)
+        self.low_only.setVisible(self.displayed_kind == 'keyness')
         if not self.source.count() and not self.thread:
             self.summary.setText('먼저 형태소 분석을 실행하거나 이미 분석된 파일을 불러오세요.')
+
+    def kind_changed(self):
+        if self.kind.currentData() == 'keyness':
+            self.sort.setCurrentIndex(self.sort.findData('score'))
+        self.refresh()
+
+    def pair_changed(self):
+        self.confirm_external.setChecked(False)
+        self.refresh()
 
     def refresh_saved(self):
         self.saved.clear()
@@ -335,8 +401,11 @@ class StatisticsDialog(JobDialog):
 
     def settings(self):
         result = {'kind': self.kind.currentData(), 'pos': self.pos.text(), 'cross_utterances': self.cross.isChecked()}
-        if result['kind'] == 'ngram':
+        if result['kind'] in ('ngram', 'keyness'):
             result.update(n=self.n.value(), include_pos=self.include_pos.isChecked())
+            if result['kind'] == 'keyness':
+                result.update(metric=self.keyness_metric.currentData(), confirm_external=self.confirm_external.isChecked(),
+                              target_result=self.source.currentData(), reference_result=self.reference.currentData())
         else:
             result.update(center=self.center.text().strip(), left=self.left.value(), right=self.right.value(),
                           minimum=self.minimum.value(), metric=self.metric.currentText())
@@ -351,9 +420,19 @@ class StatisticsDialog(JobDialog):
         source = self.project_file.parent / relative
         directory = self.project_file.with_suffix('.results')
         sort, limit = self.sort.currentData(), self.limit.currentData()
-        self.background(lambda cancel, progress: analyze_statistics(source, settings, directory, cancel, progress, sort=sort, limit=limit), self.new_result)
+        if settings['kind'] == 'keyness':
+            relative_reference = self.reference.currentData()
+            if not relative_reference:
+                self.on_error('참조 말뭉치 결과를 선택하세요.')
+                return
+            reference = self.project_file.parent / relative_reference
+            self.background(lambda cancel, progress: analyze_keyness(source, reference, settings, directory, cancel, progress, sort=sort, limit=limit), self.new_result)
+        else:
+            self.background(lambda cancel, progress: analyze_statistics(source, settings, directory, cancel, progress, sort=sort, limit=limit), self.new_result)
 
     def new_result(self, result):
+        if not result.cancelled:
+            self.low_only.setChecked(False)
         self.show_result(result)
         if not result.cancelled:
             self.result_saved.emit(result)
@@ -375,13 +454,22 @@ class StatisticsDialog(JobDialog):
                 self.table.setItem(index, column, item)
         self.table.setSortingEnabled(True)
         meta = result.metadata
-        column = 1 if meta['kind'] == 'ngram' else 9 if self.sort.currentData() == 'score' else 6
+        self.displayed_kind = meta['kind']
+        if self.displayed_kind != 'keyness':
+            self.low_only.setChecked(False)
+        column = (5 if self.sort.currentData() == 'score' else 1) if meta['kind'] == 'keyness' else 1 if meta['kind'] == 'ngram' else 9 if self.sort.currentData() == 'score' else 6
         self.table.sortItems(column, Qt.SortOrder.DescendingOrder)
         self.summary.setText(f"완료 · {meta['utterances']:,}발화 · 대상 형태소 {meta['eligible_tokens']:,} · 전체 N-gram/공기 슬롯 {meta['population']:,} · 후보 {meta['result_count']:,} · 표시 {len(result.rows):,}행\n" + meta['note'])
+        if meta['kind'] == 'keyness':
+            self.summary.setText(f"핵심도 완료 · 전체 N-gram 대상 {meta['target_ngrams']:,} / 참조 {meta['reference_ngrams']:,} · 합집합 {meta['result_count']:,}종 · 기대빈도<5 {meta['low_expected_count']:,}종 · 표시 {len(result.rows):,}행\n" + meta['note'])
         ordered = {'kind': meta['kind'], 'settings': meta['settings'], 'population': meta['population'], **meta}
         self.details.setPlainText('저장된 결과의 설정과 빈도 기준 (위 편집 중인 설정과 다를 수 있음):\n' + json.dumps(ordered, ensure_ascii=False, indent=2))
 
     def on_progress(self, units, tokens, items):
+        if self.kind.currentData() == 'keyness':
+            label = f'{"대상" if units == -1 else "참조"} 준비/집계 · 발화 {tokens:,} · N-gram {items:,}' if units < 0 else f'핵심도 비교 후보 {units:,}종'
+            self.summary.setText(label)
+            return
         self.summary.setText(f'처리 {units:,}발화 · 형태소 {tokens:,} · 생성 N-gram/공기 슬롯 {items:,}')
 
     def open_saved(self):
@@ -395,4 +483,10 @@ class StatisticsDialog(JobDialog):
 
     def load_path(self, path):
         sort, limit = self.sort.currentData(), self.limit.currentData()
-        self.background(lambda cancel, progress: load_statistics(path, sort, limit, cancel), self.show_result)
+        low = self.low_only.isChecked()
+        self.background(lambda cancel, progress: load_statistics(path, sort, limit, cancel, low_expected_only=low), self.show_result)
+
+    def open_export(self):
+        if self.current_result_path and not self.thread:
+            from .export_ui import ExportDialog
+            ExportDialog(self.current_result_path, self, sort=self.sort.currentData()).exec()

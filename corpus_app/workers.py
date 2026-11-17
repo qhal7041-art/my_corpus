@@ -5,7 +5,7 @@ from .json_corpus import process_corpus
 
 
 class CorpusWorker(QObject):
-    progress = pyqtSignal(int, int, int)
+    progress = pyqtSignal(object, object, object)
     result = pyqtSignal(object)
     error = pyqtSignal(str)
     finished = pyqtSignal()
@@ -28,7 +28,7 @@ class CorpusWorker(QObject):
 
 class FunctionWorker(QObject):
     """Reusable worker for disk-backed analysis/result loading."""
-    progress = pyqtSignal(int, int, int)
+    progress = pyqtSignal(object, object, object)
     result = pyqtSignal(object)
     error = pyqtSignal(str)
     finished = pyqtSignal()

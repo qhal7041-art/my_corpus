@@ -34,7 +34,7 @@ def score_pair(count, left, right, population, metric):
     raise ValueError('지원하지 않는 연어 지표입니다.')
 
 
-def load_statistics(path, sort='frequency', limit=100, cancel=None):
+def load_statistics(path, sort='frequency', limit=100, cancel=None, *, low_expected_only=False):
     if sort not in ('frequency', 'score') or limit not in (10, 100, 1000):
         raise ValueError('지원하지 않는 결과 정렬/미리보기 크기입니다.')
     cancel = cancel or Event()
@@ -49,8 +49,9 @@ def load_statistics(path, sort='frequency', limit=100, cancel=None):
             metadata = json.loads(record[0])
             if metadata.get('format') != 1 or not metadata.get('complete'):
                 raise ValueError('지원하지 않거나 미완료인 통계 결과입니다.')
+            condition = 'WHERE low_expected=1' if low_expected_only and metadata.get('kind') == 'keyness' else ''
             rows = [json.loads(row[0]) for row in db.execute(
-                f'SELECT row_json FROM results ORDER BY {sort} DESC,label ASC LIMIT ?', (limit,))]
+                f'SELECT row_json FROM results {condition} ORDER BY {sort} DESC,label ASC LIMIT ?', (limit,))]
             return StatisticsResult(str(filename), metadata, metadata['columns'], rows)
     except (Cancelled, sqlite3.OperationalError):
         if cancel.is_set():

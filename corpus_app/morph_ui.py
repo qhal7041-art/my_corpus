@@ -24,6 +24,7 @@ class MorphDialog(QDialog):
         self.worker = None
         self.closing = False
         self.last_result = None
+        self.export_path = None
         self.setWindowTitle('형태소 분석 — ' + ('대상 말뭉치' if role == 'target' else '참조 말뭉치'))
         self.resize(1000, 760)
         layout = QVBoxLayout(self)
@@ -110,6 +111,9 @@ class MorphDialog(QDialog):
         self.table.setColumnWidth(0, 220)
         self.table.setColumnWidth(2, 220)
         layout.addWidget(self.table, 1)
+        self.export_button = QPushButton('저장된 전체 형태소 결과 내보내기…')
+        self.export_button.clicked.connect(self.open_export)
+        layout.addWidget(self.export_button)
         self.summary = QLabel('설정을 확인한 뒤 분석하세요. 모델 초기화는 시간이 걸릴 수 있습니다.')
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
@@ -183,6 +187,7 @@ class MorphDialog(QDialog):
         self.run_button.setText('형태소 분석 (API 서버 전송)' if name == 'bareun' else '형태소 분석 (로컬 모델·첫 다운로드 가능)' if name == 'baropy' else '형태소 분석 / 같은 데이터·설정 결과 재사용')
         self.run_button.setEnabled(not self.thread and info.available and (name not in ('bareun', 'baropy') or bool(self.api_key.text().strip())) and bool(self.source.folder) and self.source.field_path is not None)
         self.load_button.setEnabled(not self.thread and self.saved_results.count() > 0)
+        self.export_button.setEnabled(not self.thread and self.export_path is not None)
 
     def refresh_results(self):
         self.saved_results.clear()
@@ -208,6 +213,7 @@ class MorphDialog(QDialog):
 
     def start(self, function, save):
         self.last_result = None
+        self.export_path = None
         self.should_save = save
         self.table.setRowCount(0)
         self.details.clear()
@@ -223,7 +229,7 @@ class MorphDialog(QDialog):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.finished_job)
         self.thread.finished.connect(self.thread.deleteLater)
-        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.run_button, self.save_options, self.saved_results, self.load_button, self.local_threads, self.local_sense, self.local_nouns, self.local_cache] + [c for _, c in self.options + self.bareun_options]:
+        for control in [self.engine, self.dictionary, self.api_key, self.server_dicts, self.utagger_version, self.run_button, self.save_options, self.saved_results, self.load_button, self.local_threads, self.local_sense, self.local_nouns, self.local_cache, self.export_button] + [c for _, c in self.options + self.bareun_options]:
             control.setEnabled(False)
         self.progress.setRange(0, 0)
         self.cancel_button.setEnabled(True)
@@ -242,6 +248,7 @@ class MorphDialog(QDialog):
         if report.cancelled:
             self.summary.setText(f'취소됨: {report.processed:,}파일, {report.texts:,}발화 처리. 부분 결과는 저장하지 않았습니다.')
             return
+        self.export_path = result.path
         self.summary.setText(f'{"재사용" if result.reused else "완료 / 저장 당시 결과"} · 성공 {report.succeeded:,}파일 · 실패 {report.failed:,} · '
                              f'발화 {report.texts:,} · 형태소 {result.tokens:,} · 누락 분기 {report.missing:,} · 비문자열 {report.non_string:,} · 빈 배열 {report.empty_arrays:,}')
         self.table.setRowCount(len(result.preview))
@@ -262,6 +269,11 @@ class MorphDialog(QDialog):
             self.worker.cancel.set()
             self.cancel_button.setEnabled(False)
             self.summary.setText('취소 요청됨. 현재 모델 초기화/발화 분석이 끝나면 중단합니다.')
+
+    def open_export(self):
+        if self.export_path and not self.thread:
+            from .export_ui import ExportDialog
+            ExportDialog(self.export_path, self, morphology=True).exec()
 
     def finished_job(self):
         self.thread = None
