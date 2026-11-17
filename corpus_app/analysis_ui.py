@@ -5,6 +5,7 @@ from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QSpinBox, QCheckBox)
+from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name
 from .workers import FunctionWorker
 from .tagged_import import import_tagged, import_database
 from .statistics.analysis import analyze_statistics, load_statistics
@@ -14,13 +15,14 @@ from .statistics.keyness import analyze_keyness
 class JobDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        apply_theme()
         self.thread = self.worker = None
         self.closing = False
         self.inputs = []
         self.last_result = None
 
     def job_footer(self, layout):
-        self.summary = QLabel('준비됨')
+        self.summary = StatusLabel('준비됨')
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
         row = QHBoxLayout()
@@ -35,7 +37,8 @@ class JobDialog(QDialog):
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setMaximumHeight(150)
-        layout.addWidget(self.details)
+        self.details_panel = DetailsPanel(self.details)
+        layout.addWidget(self.details_panel)
 
     def background(self, function, callback):
         if self.thread:
@@ -68,6 +71,7 @@ class JobDialog(QDialog):
     def on_error(self, message):
         self.summary.setText('실패 — 기존 완료 결과는 유지됩니다.')
         self.details.setPlainText(message)
+        self.details_panel.open()
 
     def finished_job(self):
         self.thread = self.worker = None
@@ -163,6 +167,16 @@ class TaggedImportDialog(JobDialog):
         layout.addWidget(self.export_button)
         self.job_footer(layout)
         self.inputs = [self.mode, self.plus_delimited, self.choose, self.path, self.form, self.pos, self.id, self.run_button, self.export_button]
+        self.plus_delimited.setText('TXT의 + 연결도 분리')
+        self.plus_delimited.setToolTip('형태소/품사+형태소/품사 형식의 + 연결을 분리합니다.')
+        self.run_button.setText('파일 불러오기')
+        primary(self.run_button)
+        self.export_button.setText('전체 형태소 결과 내보내기…')
+        arrange_dialog(self, '분석된 파일 불러오기', '형태소·품사를 그대로 가져옵니다. TXT는 한 줄을 한 발화로 읽습니다.',
+            ['입력 형식', self.mode, self.plus_delimited, self.choose, self.file_label,
+             self.path_label, self.path, self.mapping_labels[0], self.form, self.mapping_labels[1], self.pos,
+             self.mapping_labels[2], self.id, self.run_button],
+            ['가져온 결과', self.table, self.export_button, self.summary, [self.progress, self.cancel_button], self.details_panel])
         self.refresh()
 
     def refresh(self):
@@ -217,7 +231,7 @@ class TaggedImportDialog(JobDialog):
         self.table.setRowCount(len(result.preview))
         for index, (text, source, identifier, tokens) in enumerate(result.preview):
             for column, value in enumerate((text, tokens, source, identifier)):
-                self.table.setItem(index, column, QTableWidgetItem(value))
+                self.table.setItem(index, column, table_item(value))
         prefix = '기존 결과 복사 완료 (저장 당시 집계)' if self.mode.currentData() == 'sqlite' else '완료'
         self.summary.setText(f'{prefix} · 성공 {report.succeeded:,}파일 · 실패 {report.failed:,} · 발화 {report.texts:,} · 형태소 {result.tokens:,} · 누락 분기 {report.missing:,}')
         self.details.setPlainText(json.dumps(result.config, ensure_ascii=False, indent=2) + '\n' +
@@ -250,7 +264,7 @@ class StatisticsDialog(JobDialog):
             if entry.get('type') == 'morphology':
                 if entry.get('role') == role:
                     preferred = self.source.count()
-                self.source.addItem(f"[{entry.get('role', '')}] {entry.get('label', entry['path'])}", entry['path'])
+                self.source.addItem(f"[{ {'target':'대상', 'reference':'참조'}.get(entry.get('role'), '자료')}] {result_name(entry)}", entry['path'])
         self.source.setCurrentIndex(preferred)
         self.source_label = QLabel('형태소 분석 결과')
         layout.addWidget(self.source_label)
@@ -261,7 +275,7 @@ class StatisticsDialog(JobDialog):
         reference_preferred = 0
         for entry in project.results:
             if entry.get('type') == 'morphology':
-                self.reference.addItem(f"[{entry.get('role', '')}] {entry.get('label', entry['path'])}", entry['path'])
+                self.reference.addItem(f"[{ {'target':'대상', 'reference':'참조'}.get(entry.get('role'), '자료')}] {result_name(entry)}", entry['path'])
                 if entry.get('role') == 'reference':
                     reference_preferred = self.reference.count() - 1
         self.reference.setCurrentIndex(reference_preferred)
@@ -339,6 +353,22 @@ class StatisticsDialog(JobDialog):
         self.inputs = [self.source, self.kind, self.pos, self.cross, self.n, self.include_pos, self.center,
                        self.left, self.right, self.minimum, self.metric, self.run_button, self.saved, self.open_button,
                        self.sort, self.limit, self.view_button, self.reference, self.confirm_external, self.keyness_metric, self.export_button, self.low_only]
+        self.confirm_external.setToolTip(self.confirm_external.text())
+        self.confirm_external.setText('분석 방식·품사·사전의 동일성 확인')
+        self.cross.setText('발화 경계 넘기 · 파일 경계 유지')
+        self.include_pos.setText('형태소와 품사 함께 사용')
+        self.run_button.setText('통계 계산')
+        self.view_button.setText('조회 적용')
+        self.open_button.setText('열기')
+        self.export_button.setText('전체 통계 결과 내보내기…')
+        self.low_only.setText('기대빈도 5 미만만 조회')
+        primary(self.run_button)
+        arrange_dialog(self, '통계 분석', '저장된 형태소 결과로 연어·N-gram·참조 핵심도를 계산합니다.',
+            ['분석 종류', self.kind, self.source_label, self.source, self.reference_label, self.reference,
+             self.confirm_external, '분석 조건', self.pos, self.cross, self.n, self.include_pos,
+             self.keyness_metric, self.center, self.left, self.right, self.minimum, self.metric, self.run_button],
+            ['분석 결과', [self.saved, self.open_button], [self.sort, self.limit, self.view_button], self.low_only,
+             self.table, self.export_button, self.summary, [self.progress, self.cancel_button], self.details_panel])
         settings = project.analysis_settings.get('statistics', {})
         self.kind.setCurrentIndex(max(0, self.kind.findData(settings.get('kind', 'ngram'))))
         self.pos.setText(settings.get('pos', ''))
@@ -449,8 +479,7 @@ class StatisticsDialog(JobDialog):
         self.table.setRowCount(len(result.rows))
         for index, row in enumerate(result.rows):
             for column, value in enumerate(row):
-                item = QTableWidgetItem()
-                item.setData(Qt.ItemDataRole.DisplayRole, value)
+                item = table_item(value)
                 self.table.setItem(index, column, item)
         self.table.setSortingEnabled(True)
         meta = result.metadata

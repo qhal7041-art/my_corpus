@@ -6,7 +6,9 @@ from PyQt6.QtWidgets import (
     QFileDialog, QInputDialog, QMessageBox, QStackedWidget, QComboBox,
     QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem,
     QSplitter, QProgressBar, QPlainTextEdit, QHeaderView, QAbstractItemView,
+    QFrame, QLineEdit, QTabWidget, QSizePolicy, QScrollArea,
 )
+from .presentation import apply_theme, label, primary, StatusLabel, DetailsPanel, finish_ui, table_item, result_name
 from .project import Project
 from .workers import CorpusWorker
 from .json_corpus import display_path
@@ -15,6 +17,7 @@ from .json_corpus import display_path
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        apply_theme()
         self.project = None
         self.project_file = None
         self.thread = None
@@ -26,118 +29,196 @@ class MainWindow(QMainWindow):
         self.last_report = None
         self.last_error = None
         self.setWindowTitle("말뭉치 연구실")
-        self.resize(1200, 800)
+        self.resize(1280, 820)
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
         self.build_welcome()
         self.build_workspace()
         menu = self.menuBar().addMenu("프로젝트")
         self.new_action = menu.addAction("새 프로젝트…", self.new_project)
+        self.new_action.setShortcut("Ctrl+N")
         self.open_action = menu.addAction("프로젝트 열기…", self.open_project)
+        self.open_action.setShortcut("Ctrl+O")
         self.save_action = menu.addAction("저장", self.save_project)
         self.save_action.setShortcut("Ctrl+S")
         self.save_action.setEnabled(False)
+        finish_ui(self)
 
     def build_welcome(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addStretch()
-        title = QLabel("말뭉치 연구실\n한국어 JSON 말뭉치 프로젝트")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 26px; font-weight: 600; padding: 30px")
-        layout.addWidget(title)
-        for label, callback in (("새 연구 프로젝트 만들기", self.new_project), ("기존 프로젝트 열기", self.open_project)):
-            button = QPushButton(label)
-            button.setMinimumHeight(48)
-            button.clicked.connect(callback)
-            layout.addWidget(button)
-        hint = QLabel("JSON · TXT · Excel 말뭉치 탐색 · 형태소 분석\n원본 파일은 수정하지 않습니다.")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hint)
-        layout.addStretch()
+        page = QWidget(); page.setObjectName('page')
+        outer = QVBoxLayout(page); outer.setContentsMargins(50, 40, 50, 40)
+        outer.addStretch()
+        card = QFrame(); card.setObjectName('card'); card.setMaximumWidth(760)
+        layout = QVBoxLayout(card); layout.setContentsMargins(48, 40, 48, 40); layout.setSpacing(18)
+        layout.addWidget(label('한국어 말뭉치 분석', 'section'))
+        layout.addWidget(label('말뭉치 연구실', 'hero'))
+        layout.addWidget(label('자료를 불러오고, 분석 결과를 연구 프로젝트에 모아 보세요.'))
+        steps = QHBoxLayout()
+        for title, description in [('01  자료 선택', 'JSON · TXT · Excel'), ('02  형태소 분석', '분석기 또는 사전 분석 자료'), ('03  통계·내보내기', '연어 · N-gram · 핵심도')]:
+            box = QVBoxLayout(); box.addWidget(label(title, 'section')); box.addWidget(label(description)); steps.addLayout(box)
+        layout.addLayout(steps)
+        row = QHBoxLayout()
+        self.welcome_new = primary(QPushButton('새 프로젝트 만들기'))
+        self.welcome_new.clicked.connect(self.new_project)
+        self.welcome_open = QPushButton('기존 프로젝트 열기')
+        self.welcome_open.clicked.connect(self.open_project)
+        for button in (self.welcome_new, self.welcome_open):
+            button.setMinimumHeight(30); row.addWidget(button)
+        layout.addLayout(row)
+        layout.addWidget(label('이미 형태소·품사가 붙은 TXT도 재분석 없이 사용할 수 있습니다.'))
+        outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
+        outer.addStretch()
         self.stack.addWidget(page)
 
     def build_workspace(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        self.heading = QLabel()
-        self.heading.setStyleSheet("font-size: 20px; font-weight: 600")
-        layout.addWidget(self.heading)
-        row = QHBoxLayout()
-        self.role = QComboBox()
-        self.role.addItem("대상 말뭉치", "target")
-        self.role.addItem("참조 말뭉치 (선택 사항)", "reference")
-        self.role.currentIndexChanged.connect(self.source_changed)
-        row.addWidget(self.role)
-        self.connect_button = QPushButton("폴더 연결 / 재연결…")
-        self.connect_button.clicked.connect(self.connect_folder)
-        row.addWidget(self.connect_button)
-        self.scan_button = QPushButton("구조 다시 읽기")
-        self.scan_button.clicked.connect(self.scan)
-        row.addWidget(self.scan_button)
-        self.save_button = QPushButton("프로젝트 저장")
-        self.save_button.clicked.connect(self.save_project)
-        row.addWidget(self.save_button)
-        self.morph_button = QPushButton("형태소 분석…")
+        page = QWidget(); page.setObjectName('page')
+        shell = QHBoxLayout(page); shell.setContentsMargins(0, 0, 0, 0); shell.setSpacing(0)
+        sidebar = QFrame(); sidebar.setObjectName('sidebar'); sidebar.setFixedWidth(226)
+        nav = QVBoxLayout(sidebar); nav.setContentsMargins(16, 20, 16, 16); nav.setSpacing(8)
+        nav.addWidget(label('말뭉치 연구실', 'section'))
+        nav.addWidget(label('연구 워크스페이스'))
+        nav.addSpacing(12)
+        self.data_button = QPushButton('01   자료·필드 선택')
+        self.data_button.setProperty('role', 'nav'); self.data_button.setCheckable(True); self.data_button.setChecked(True)
+        self.data_button.clicked.connect(lambda: (self.workspace_tabs.setCurrentIndex(0), self.data_button.setChecked(True)))
+        self.morph_button = QPushButton('02   형태소 분석…'); self.morph_button.setProperty('role', 'nav')
         self.morph_button.clicked.connect(self.open_morphology)
-        row.addWidget(self.morph_button)
-        layout.addLayout(row)
-        analysis_row = QHBoxLayout()
-        self.import_button = QPushButton('이미 분석된 형태소·품사 파일 불러오기…')
-        self.import_button.clicked.connect(self.open_tagged_import)
-        analysis_row.addWidget(self.import_button)
-        self.statistics_button = QPushButton('연어 · N-gram · 핵심도 분석…')
+        self.statistics_button = QPushButton('03   통계·핵심도…'); self.statistics_button.setProperty('role', 'nav')
         self.statistics_button.clicked.connect(self.open_statistics)
-        analysis_row.addWidget(self.statistics_button)
-        layout.addLayout(analysis_row)
-        self.folder_label = QLabel()
-        self.folder_label.setWordWrap(True)
-        layout.addWidget(self.folder_label)
-        self.selected_label = QLabel()
-        self.selected_label.setWordWrap(True)
-        layout.addWidget(self.selected_label)
-        split = QSplitter(Qt.Orientation.Vertical)
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["필드 / 경로", "자료형", "예시 값 (최대 160자)", "존재 파일 / 성공 파일"])
-        self.tree.setColumnWidth(0, 400)
-        self.tree.setColumnWidth(1, 150)
-        self.tree.setColumnWidth(2, 280)
-        self.tree.itemSelectionChanged.connect(self.selection_changed)
-        split.addWidget(self.tree)
-        self.preview = QTableWidget(0, 3)
-        self.preview.setHorizontalHeaderLabels(["추출 텍스트 (최대 500자)", "원본 파일", "발화 ID"])
+        for button in (self.data_button, self.morph_button, self.statistics_button): nav.addWidget(button)
+        nav.addSpacing(12)
+        nav.addWidget(label('사전 분석 자료', 'section'))
+        self.import_button = QPushButton('분석된 파일 불러오기…'); self.import_button.clicked.connect(self.open_tagged_import)
+        nav.addWidget(self.import_button)
+        nav.addWidget(label('이미 분석된 TXT · JSON · Excel'))
+        nav.addStretch()
+        self.saved_count = label('저장 결과 0개', 'section'); nav.addWidget(self.saved_count)
+        self.save_state = label('프로젝트 준비 중'); nav.addWidget(self.save_state)
+        self.save_button = primary(QPushButton('프로젝트 저장'))
+        self.save_button.clicked.connect(self.save_project); nav.addWidget(self.save_button)
+        self.project_switch = QPushButton('다른 프로젝트 열기…'); self.project_switch.clicked.connect(self.open_project); nav.addWidget(self.project_switch)
+        shell.addWidget(sidebar)
+        content = QVBoxLayout(); content.setContentsMargins(24, 16, 24, 12); content.setSpacing(8)
+        shell.addLayout(content, 1)
+        self.heading = label('', 'title'); content.addWidget(self.heading)
+        self.project_path = label(''); self.project_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.project_path.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred); content.addWidget(self.project_path)
+        self.workspace_tabs = QTabWidget(); content.addWidget(self.workspace_tabs, 1)
+        self.workspace_tabs.currentChanged.connect(lambda index: self.data_button.setChecked(index == 0))
+        data = QWidget(); data.setObjectName('page'); layout = QVBoxLayout(data); layout.setContentsMargins(0, 8, 0, 0); layout.setSpacing(8)
+        self.data_scroll = QScrollArea(); self.data_scroll.setWidgetResizable(True); self.data_scroll.setWidget(data)
+        self.workspace_tabs.addTab(self.data_scroll, '자료 탐색')
+        row = QHBoxLayout()
+        self.role = QComboBox(); self.role.addItem('대상 말뭉치', 'target'); self.role.addItem('참조 말뭉치', 'reference')
+        self.role.currentIndexChanged.connect(self.source_changed); row.addWidget(self.role, 1)
+        self.connect_button = primary(QPushButton('폴더 연결 / 재연결…')); self.connect_button.clicked.connect(self.connect_folder); row.addWidget(self.connect_button)
+        self.scan_button = QPushButton('구조 다시 읽기'); self.scan_button.clicked.connect(self.scan); row.addWidget(self.scan_button)
+        layout.addLayout(row)
+        self.folder_label = label(''); self.folder_label.setWordWrap(False); self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.folder_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred); layout.addWidget(self.folder_label)
+        metrics = QHBoxLayout(); self.metric_values = {}
+        for key, caption in [('files', '읽은 파일'), ('texts', '추출 문자열'), ('failed', '읽기 실패')]:
+            card = QFrame(); card.setObjectName('card'); box = QHBoxLayout(card); box.setContentsMargins(14, 8, 14, 8)
+            caption_label = label(caption); caption_label.setWordWrap(False); box.addWidget(caption_label, 1)
+            value = label('—', 'metric'); value.setWordWrap(False); box.addWidget(value); metrics.addWidget(card)
+            self.metric_values[key] = value
+        layout.addLayout(metrics)
+        self.selected_label = label(''); self.selected_label.setWordWrap(False); self.selected_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.selected_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred); layout.addWidget(self.selected_label)
+        self.schema_search = QLineEdit(); self.schema_search.setPlaceholderText('필드 경로 또는 자료형 검색'); self.schema_search.setClearButtonEnabled(True)
+        self.search_timer = QTimer(self); self.search_timer.setSingleShot(True); self.search_timer.setInterval(150)
+        self.schema_search.textChanged.connect(lambda: self.search_timer.start()); self.search_timer.timeout.connect(self.filter_tree)
+        search_row = QHBoxLayout(); search_row.addWidget(self.schema_search, 1); layout.addLayout(search_row)
+        split = QSplitter(Qt.Orientation.Vertical); split.setChildrenCollapsible(False)
+        self.tree = QTreeWidget(); self.tree.setHeaderLabels(['필드 / 경로', '자료형', '예시 값', '존재 파일 / 성공 파일'])
+        self.tree.setAlternatingRowColors(True); self.tree.setColumnWidth(0, 310); self.tree.setColumnWidth(1, 110); self.tree.setColumnWidth(2, 240)
+        self.tree.itemSelectionChanged.connect(self.selection_changed); split.addWidget(self.tree)
+        self.preview = QTableWidget(0, 3); self.preview.setHorizontalHeaderLabels(['추출 텍스트 · 앞 100건 / 500자', '원본 파일', '발화 ID'])
         self.preview.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.preview.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.preview.setColumnWidth(1, 350)
-        split.addWidget(self.preview)
-        split.setSizes([350, 200])
-        layout.addWidget(split, 1)
-        self.preview_button = QPushButton("선택한 필드로 전체 추출 건수 확인 / 미리보기")
-        self.preview_button.clicked.connect(self.extract)
-        self.preview_button.setEnabled(False)
-        layout.addWidget(self.preview_button)
-        self.summary = QLabel("폴더를 연결하면 JSON · TXT · Excel을 파일별로 탐색합니다.")
-        self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
-        row = QHBoxLayout()
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        row.addWidget(self.progress)
-        self.cancel_button = QPushButton("작업 취소")
-        self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self.cancel_job)
-        row.addWidget(self.cancel_button)
-        layout.addLayout(row)
-        self.errors = QPlainTextEdit()
-        self.errors.setReadOnly(True)
-        self.errors.setMaximumHeight(110)
-        self.errors.setPlaceholderText("읽기 실패 이유가 여기에 표시됩니다 (최대 100건).")
-        layout.addWidget(self.errors)
-        future = QLabel("형태소 · 연어 · N-gram · 참조 핵심도(G²/χ²) · 전체 결과 Excel/CSV 내보내기")
-        future.setStyleSheet("color: #666; padding: 6px")
-        layout.addWidget(future)
+        self.preview.setColumnWidth(1, 260); self.preview.setColumnWidth(2, 90); split.addWidget(self.preview)
+        split.setMinimumHeight(260); split.setSizes([150, 110]); layout.addWidget(split, 1)
+        self.field_count = label('폴더를 연결해 필드를 확인하세요.'); self.field_count.setWordWrap(False); search_row.addWidget(self.field_count)
+        self.preview_button = QPushButton('선택 필드 미리보기'); self.preview_button.clicked.connect(self.extract); self.preview_button.setEnabled(False); search_row.addWidget(self.preview_button)
+        history_page = QWidget(); history = QVBoxLayout(history_page); history.setContentsMargins(0, 14, 0, 0); history.setSpacing(10)
+        history.addWidget(label('저장된 분석을 다시 열거나 이어서 내보낼 수 있습니다.'))
+        self.history_tree = QTreeWidget(); self.history_tree.setHeaderLabels(['분석', '말뭉치', '저장된 결과'])
+        self.history_tree.setAlternatingRowColors(True); self.history_tree.setColumnWidth(0, 130); self.history_tree.setColumnWidth(1, 100)
+        self.history_tree.itemDoubleClicked.connect(self.open_history_result)
+        self.history_tree.itemSelectionChanged.connect(lambda: self.history_open.setEnabled(not self.thread and bool(self.history_tree.selectedItems())))
+        history.addWidget(self.history_tree, 1)
+        self.history_open = QPushButton('선택한 결과 열기…'); self.history_open.clicked.connect(self.open_history_result); history.addWidget(self.history_open)
+        self.workspace_tabs.addTab(history_page, '저장된 결과')
+        self.summary = StatusLabel('폴더를 연결하거나 사전 분석 자료를 불러오세요.'); content.addWidget(self.summary)
+        row = QHBoxLayout(); self.progress = QProgressBar(); self.progress.setRange(0, 1); self.progress.setValue(0); self.progress.setTextVisible(False); row.addWidget(self.progress, 1)
+        self.cancel_button = QPushButton('작업 취소'); self.cancel_button.setEnabled(False); self.cancel_button.clicked.connect(self.cancel_job); row.addWidget(self.cancel_button)
+        content.addLayout(row)
+        self.errors = QPlainTextEdit(); self.errors.setReadOnly(True)
+        self.errors.setPlaceholderText('읽기 실패 이유를 여기에 표시합니다. 앞 100건까지 확인할 수 있습니다.')
+        self.error_panel = DetailsPanel(self.errors, '오류 및 처리 기록', auto_errors=True); content.addWidget(self.error_panel)
         self.stack.addWidget(page)
+
+    def update_project_header(self):
+        if not self.project:
+            return
+        self.project_path.setText(str(self.project_file)); self.project_path.setToolTip(str(self.project_file))
+        self.save_state.setText('저장하지 않은 변경 있음' if self.dirty else '모든 변경 저장됨')
+        self.setWindowModified(self.dirty)
+        self.saved_count.setText(f'저장 결과 {len(self.project.results):,}개')
+        self.history_tree.clear()
+        names = {'ngram':'N-gram', 'collocation':'연어', 'keyness':'핵심도'}
+        for entry in self.project.results:
+            kind = '형태소' if entry.get('type') == 'morphology' else names.get(entry.get('config', {}).get('kind'), '통계')
+            role = {'target':'대상', 'reference':'참조'}.get(entry.get('role'), '')
+            item = QTreeWidgetItem([kind, role, result_name(entry)])
+            item.setData(0, Qt.ItemDataRole.UserRole, entry)
+            item.setToolTip(2, str(self.project_file.parent / entry.get('path', '')))
+            self.history_tree.addTopLevelItem(item)
+        self.workspace_tabs.setTabText(1, f'저장된 결과 ({len(self.project.results):,})')
+        self.history_open.setEnabled(not self.thread and bool(self.history_tree.selectedItems()))
+
+    def filter_tree(self):
+        query = self.schema_search.text().casefold().strip()
+        matches = 0
+        def visit(item):
+            nonlocal matches
+            matched = not query or query in (item.text(0) + ' ' + item.text(1)).casefold()
+            child_match = False
+            for index in range(item.childCount()):
+                child_match = visit(item.child(index)) or child_match
+            item.setHidden(not matched and not child_match)
+            if query and child_match:
+                item.setExpanded(True)
+            if matched:
+                matches += 1
+            return matched or child_match
+        for index in range(self.tree.topLevelItemCount()): visit(self.tree.topLevelItem(index))
+        self.field_count.setText(f'{matches:,}개 필드' if not query else f'검색 일치 {matches:,}개 필드')
+
+    def open_history_result(self, *args):
+        if self.thread:
+            return
+        items = self.history_tree.selectedItems()
+        if not items:
+            return
+        entry = items[0].data(0, Qt.ItemDataRole.UserRole)
+        role = entry.get('role', 'target')
+        if role not in ('target', 'reference'): role = 'target'
+        if entry.get('type') == 'morphology':
+            from .morph_ui import MorphDialog
+            dialog = MorphDialog(self.project, self.project_file, role, self)
+            dialog.settings_saved.connect(self.save_analyzer_settings)
+            dialog.result_saved.connect(lambda result: self.save_morph_result(result, role))
+            index = dialog.saved_results.findData(entry['path'])
+            if index >= 0: dialog.saved_results.setCurrentIndex(index)
+            QTimer.singleShot(0, dialog.open_result)
+        else:
+            from .analysis_ui import StatisticsDialog
+            dialog = StatisticsDialog(self.project, self.project_file, role, self)
+            dialog.result_saved.connect(self.save_statistics_result)
+            dialog.settings_saved.connect(self.save_statistics_settings)
+            QTimer.singleShot(0, lambda: dialog.load_path(self.project_file.parent / entry['path']))
+        dialog.exec()
 
     def confirm_discard(self):
         if not self.dirty:
@@ -191,7 +272,8 @@ class MainWindow(QMainWindow):
         self.role.setCurrentIndex(0)
         self.role.blockSignals(False)
         self.heading.setText(project.name)
-        self.setWindowTitle(f"{project.name} — 말뭉치 연구실")
+        self.setWindowTitle(f"{project.name}[*] — 말뭉치 연구실")
+        self.update_project_header()
         self.stack.setCurrentIndex(1)
         self.save_action.setEnabled(True)
         self.source_changed()
@@ -213,9 +295,9 @@ class MainWindow(QMainWindow):
         self.dirty = True
         self.save_project()
 
-    def save_morph_result(self, result):
+    def save_morph_result(self, result, role=None):
         relative = os.path.relpath(result.path, self.project_file.parent)
-        role = self.role.currentData()
+        role = role or self.role.currentData()
         self.project.results = [entry for entry in self.project.results
                                 if not (entry.get('type') == 'morphology' and entry.get('path') == relative and entry.get('role') == role)]
         self.project.results.append({'type': 'morphology', 'role': role, 'path': relative,
@@ -265,6 +347,9 @@ class MainWindow(QMainWindow):
         if not self.project:
             return
         self.tree.clear()
+        self.schema_search.clear()
+        self.field_count.setText('폴더를 연결해 필드를 확인하세요.')
+        for value in self.metric_values.values(): value.setText('—')
         self.preview.setRowCount(0)
         self.errors.clear()
         self.summary.setText("폴더를 연결하거나 구조를 다시 읽으세요.")
@@ -277,6 +362,7 @@ class MainWindow(QMainWindow):
 
     def refresh_source(self):
         source = self.current_source()
+        self.update_project_header()
         self.folder_label.setText("폴더: " + (source.folder or "연결되지 않음"))
         self.selected_label.setText("저장할 분석 필드: " + (display_path(source.field_path) if source.field_path is not None else "선택하지 않음"))
         self.preview_button.setEnabled(not self.thread and source.field_path is not None and bool(source.folder))
@@ -295,9 +381,11 @@ class MainWindow(QMainWindow):
         try:
             self.project.save(self.project_file)
             self.dirty = False
+            self.update_project_header()
             self.statusBar().showMessage("프로젝트를 저장했습니다.", 5000)
             return True
         except (OSError, ValueError) as error:
+            self.update_project_header()
             self.show_error(str(error))
             return False
 
@@ -338,7 +426,7 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
     def set_busy(self, busy):
-        for control in (self.role, self.connect_button, self.scan_button, self.preview_button, self.tree, self.save_button, self.morph_button, self.import_button, self.statistics_button):
+        for control in (self.role, self.connect_button, self.scan_button, self.preview_button, self.tree, self.save_button, self.morph_button, self.import_button, self.statistics_button, self.project_switch, self.history_open):
             control.setEnabled(not busy)
         for action in (self.new_action, self.open_action, self.save_action):
             action.setEnabled(not busy)
@@ -355,6 +443,8 @@ class MainWindow(QMainWindow):
             self.summary.setText("취소 요청됨 — 현재 파일 읽기가 끝나면 중단합니다.")
 
     def update_progress(self, processed, succeeded, failed):
+        self.metric_values['files'].setText(f'{succeeded:,}')
+        self.metric_values['failed'].setText(f'{failed:,}')
         self.summary.setText(f"처리 {processed:,}건 · 성공 {succeeded:,}건 · 실패 {failed:,}건 (전체 개수는 탐색하며 집계)")
 
     def job_error(self, message):
@@ -364,6 +454,9 @@ class MainWindow(QMainWindow):
 
     def job_result(self, report):
         self.last_report = report
+        self.metric_values['files'].setText(f'{report.succeeded:,}')
+        self.metric_values['failed'].setText(f'{report.failed:,}')
+        if self.job_kind == 'extract': self.metric_values['texts'].setText(f'{report.texts:,}')
         status = "취소됨 · 부분 결과" if report.cancelled else "완료"
         summary = f"{status} | 발견 {report.discovered:,} · 처리 {report.processed:,} · 성공 {report.succeeded:,} · 실패 {report.failed:,}"
         self.errors.setPlainText("\n".join(f"{path}\n  {reason}" for path, reason in report.errors))
@@ -382,7 +475,7 @@ class MainWindow(QMainWindow):
             self.preview.setRowCount(len(report.preview))
             for index, row in enumerate(report.preview):
                 for column, key in enumerate(("text", "source", "utterance_id")):
-                    self.preview.setItem(index, column, QTableWidgetItem(row[key]))
+                    self.preview.setItem(index, column, table_item(row[key]))
         self.summary.setText(summary)
 
     def populate_tree(self, report):
@@ -413,6 +506,7 @@ class MainWindow(QMainWindow):
                 self.tree.scrollToItem(restored_item)
         finally:
             self.tree.blockSignals(False)
+        self.filter_tree()
 
     def selection_changed(self):
         items = self.tree.selectedItems()

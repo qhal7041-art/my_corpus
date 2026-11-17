@@ -5,6 +5,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QCheckBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QHeaderView, QProgressBar, QLineEdit, QSpinBox)
+from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name
 from .workers import FunctionWorker
 from .analyzers.registry import status
 from .morphology import analyze_corpus, load_result
@@ -16,6 +17,7 @@ class MorphDialog(QDialog):
 
     def __init__(self, project, project_file, role, parent=None):
         super().__init__(parent)
+        apply_theme()
         self.project = project
         self.project_file = Path(project_file)
         self.role = role
@@ -29,6 +31,7 @@ class MorphDialog(QDialog):
         self.resize(1000, 760)
         layout = QVBoxLayout(self)
         source_label = QLabel(f'원본: {self.source.folder}\n발화별로 분석합니다. 원문 전처리 없음 · 품사 필터 없음 · 발화 경계 유지')
+        self.source_description = source_label
         source_label.setWordWrap(True)
         layout.addWidget(source_label)
         self.engine = QComboBox()
@@ -42,7 +45,8 @@ class MorphDialog(QDialog):
         for key, label in [('normalize_coda', '받침 정규화 (normalize_coda)'),
                            ('split_complex', '복합 형태소 분리 (split_complex)'),
                            ('compatible_jamo', '호환 자모 출력 (compatible_jamo)')]:
-            control = QCheckBox(label)
+            control = QCheckBox(label.split(' (')[0])
+            control.setToolTip(key)
             self.options.append((key, control))
             layout.addWidget(control)
         self.dictionary_label = QLabel('사용자 사전: 한 줄에 형태소 품사 [점수]. 예: 제주방언 NNP 5. # 주석 허용. 내용은 프로젝트에 저장됩니다.')
@@ -70,7 +74,7 @@ class MorphDialog(QDialog):
         layout.addWidget(self.server_dicts)
         self.utagger_version = QComboBox()
         for variant in ('utagger4', 'utagger3', 'utagger4hj'):
-            self.utagger_version.addItem(variant, variant)
+            self.utagger_version.addItem({'utagger3':'UTagger 3', 'utagger4':'UTagger 4', 'utagger4hj':'UTagger 4 · 옛한글'}[variant], variant)
         self.utagger_version.currentIndexChanged.connect(self.refresh)
         layout.addWidget(self.utagger_version)
         from .analyzers.baropy_local import default_model_cache
@@ -114,7 +118,7 @@ class MorphDialog(QDialog):
         self.export_button = QPushButton('저장된 전체 형태소 결과 내보내기…')
         self.export_button.clicked.connect(self.open_export)
         layout.addWidget(self.export_button)
-        self.summary = QLabel('설정을 확인한 뒤 분석하세요. 모델 초기화는 시간이 걸릴 수 있습니다.')
+        self.summary = StatusLabel('설정을 확인한 뒤 분석하세요. 모델 초기화는 시간이 걸릴 수 있습니다.')
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
         row = QHBoxLayout()
@@ -129,7 +133,8 @@ class MorphDialog(QDialog):
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setMaximumHeight(140)
-        layout.addWidget(self.details)
+        self.details_panel = DetailsPanel(self.details)
+        layout.addWidget(self.details_panel)
         config = project.analyzer
         index = self.engine.findData(config.get('name', 'kiwi'))
         self.engine.setCurrentIndex(max(0, index))
@@ -148,6 +153,18 @@ class MorphDialog(QDialog):
         self.local_cache.setText(options.get('model_cache') or default_model_cache())
         self.engine.currentIndexChanged.connect(self.refresh)
         self.refresh_results()
+        self.save_options.setText('설정 저장')
+        self.load_button.setText('열기')
+        self.export_button.setText('전체 형태소 결과 내보내기…')
+        primary(self.run_button)
+        arrange_dialog(self, '형태소 분석', '분석기를 선택하고 설정한 뒤, 발화별 형태소와 품사를 확인하세요.',
+            ['분석 대상', self.source_description, '분석기', self.engine, self.availability,
+             *[control for _, control in self.options], self.dictionary_label, self.dictionary,
+             self.key_label, self.api_key, *[control for _, control in self.bareun_options], self.server_dicts,
+             self.utagger_version, self.local_threads, self.local_sense, self.local_nouns_label, self.local_nouns,
+             self.local_cache_label, self.local_cache, self.save_options, self.run_button],
+            ['저장된 결과', [self.saved_results, self.load_button], self.table, self.export_button,
+             self.summary, [self.progress, self.cancel_button], self.details_panel])
         self.refresh()
 
     def config(self):
@@ -184,7 +201,7 @@ class MorphDialog(QDialog):
         for control in (self.local_threads, self.local_sense, self.local_nouns_label, self.local_nouns, self.local_cache_label, self.local_cache):
             control.setVisible(name == 'baropy')
         self.utagger_version.setVisible(name == 'utagger')
-        self.run_button.setText('형태소 분석 (API 서버 전송)' if name == 'bareun' else '형태소 분석 (로컬 모델·첫 다운로드 가능)' if name == 'baropy' else '형태소 분석 / 같은 데이터·설정 결과 재사용')
+        self.run_button.setText('바른 API 분석 실행' if name == 'bareun' else '바른 로컬 분석 실행' if name == 'baropy' else '형태소 분석 실행')
         self.run_button.setEnabled(not self.thread and info.available and (name not in ('bareun', 'baropy') or bool(self.api_key.text().strip())) and bool(self.source.folder) and self.source.field_path is not None)
         self.load_button.setEnabled(not self.thread and self.saved_results.count() > 0)
         self.export_button.setEnabled(not self.thread and self.export_path is not None)
@@ -193,7 +210,7 @@ class MorphDialog(QDialog):
         self.saved_results.clear()
         for entry in self.project.results:
             if entry.get('type') == 'morphology' and entry.get('role') == self.role:
-                self.saved_results.addItem(entry.get('label', entry['path']), entry['path'])
+                self.saved_results.addItem(result_name(entry), entry['path'])
 
     def run_analysis(self):
         if self.thread:
@@ -241,6 +258,7 @@ class MorphDialog(QDialog):
     def on_error(self, message):
         self.summary.setText('분석/결과 열기 실패. 미완료 결과는 저장하지 않았습니다.')
         self.details.setPlainText(message)
+        self.details_panel.open()
 
     def on_result(self, result):
         self.last_result = result
@@ -255,7 +273,7 @@ class MorphDialog(QDialog):
         for index, row in enumerate(result.preview):
             text, source, utterance_id, tokens = row
             for column, value in enumerate((text, tokens, source, utterance_id)):
-                self.table.setItem(index, column, QTableWidgetItem(value))
+                self.table.setItem(index, column, table_item(value))
         details = '저장된 결과의 설정 (위 편집 중인 설정과 다를 수 있음):\n' + json.dumps(result.config, ensure_ascii=False, indent=2)
         details += '\n결과 파일: ' + result.path
         details += '\n' + '\n'.join(f'{path}: {reason}' for path, reason in report.errors)

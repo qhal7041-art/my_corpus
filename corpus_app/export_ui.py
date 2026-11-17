@@ -2,6 +2,7 @@
 from pathlib import Path
 from PyQt6.QtWidgets import (QVBoxLayout, QLabel, QComboBox, QCheckBox, QPushButton, QFileDialog, QMessageBox)
 from .analysis_ui import JobDialog
+from .presentation import label, primary, finish_ui
 from .exporting import export_result
 
 
@@ -11,8 +12,11 @@ class ExportDialog(JobDialog):
         self.source, self.sort = str(source), sort
         self.destination, self.overwrite = None, False
         self.setWindowTitle('전체 분석 결과 내보내기')
-        self.resize(800, 430)
+        self.resize(820, 500)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(14)
+        layout.addWidget(label('전체 결과 내보내기', 'title'))
         info = QLabel('미리보기 행 수와 관계없이 저장된 전체 결과와 당시 설정을 내보냅니다. 형태소는 토큰별 한 행, 통계는 후보별 한 행입니다.')
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -37,8 +41,10 @@ class ExportDialog(JobDialog):
         self.run_button = QPushButton('전체 결과 내보내기')
         self.run_button.clicked.connect(self.run_export)
         layout.addWidget(self.run_button)
+        primary(self.run_button)
         self.job_footer(layout)
         self.inputs = [self.format, self.include_text, self.safe_csv, self.choose, self.run_button]
+        finish_ui(self)
         self.refresh()
 
     def format_changed(self):
