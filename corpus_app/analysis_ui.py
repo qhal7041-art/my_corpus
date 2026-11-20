@@ -9,7 +9,7 @@ from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arran
 from .help_ui import helped
 from .workers import FunctionWorker
 from .tagged_import import import_tagged, import_database
-from .statistics.analysis import analyze_statistics, load_statistics
+from .statistics.analysis import analyze_statistics, load_statistics, PUNCTUATION_FILTER_VERSION
 from .statistics.keyness import analyze_keyness
 
 
@@ -294,7 +294,7 @@ class StatisticsDialog(JobDialog):
         self.pos = QLineEdit()
         self.pos.setPlaceholderText('품사 접두어 필터 (예: NN*,VV · 비우면 전체)')
         row.addWidget(self.pos, 1)
-        self.exclude_punctuation = QCheckBox('문장부호 제외')
+        self.exclude_punctuation = QCheckBox('문장부호·가운뎃점 제외')
         layout.addWidget(self.exclude_punctuation)
         self.excluded_forms = QPlainTextEdit()
         self.excluded_forms.setPlaceholderText('추가로 제외할 형태소: 한 줄에 하나\n예: 것')
@@ -510,6 +510,11 @@ class StatisticsDialog(JobDialog):
         self.summary.setText(f"완료 · {meta['utterances']:,}발화 · 대상 형태소 {meta['eligible_tokens']:,} · 전체 N-gram/공기 슬롯 {meta['population']:,} · 후보 {meta['result_count']:,} · 표시 {len(result.rows):,}행\n" + meta['note'])
         if meta['kind'] == 'keyness':
             self.summary.setText(f"핵심도 완료 · 전체 N-gram 대상 {meta['target_ngrams']:,} / 참조 {meta['reference_ngrams']:,} · 합집합 {meta['result_count']:,}종 · 기대빈도<5 {meta['low_expected_count']:,}종 · 표시 {len(result.rows):,}행\n" + meta['note'])
+        saved_filter = meta['settings'].get('exclude_punctuation', False)
+        filter_state = '켜짐' if saved_filter else '꺼짐'
+        if saved_filter and meta['settings'].get('punctuation_filter_version', 1) < PUNCTUATION_FILTER_VERSION:
+            filter_state += ' (이전 제외 기준 · 새 기준 적용은 다시 계산)'
+        self.summary.setText(self.summary.text().rstrip() + '\n저장 결과의 문장부호·가운뎃점 제외: ' + filter_state)
         ordered = {'kind': meta['kind'], 'settings': meta['settings'], 'population': meta['population'], **meta}
         self.details.setPlainText('저장된 결과의 설정과 빈도 기준 (위 편집 중인 설정과 다를 수 있음):\n' + json.dumps(ordered, ensure_ascii=False, indent=2))
 

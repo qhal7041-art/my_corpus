@@ -15,6 +15,12 @@ from ..json_corpus import checkpoint, Cancelled
 from ..morphology import load_result, pack
 
 
+# Some visually similar separators are letters or mathematical symbols in Unicode.
+# Only standalone tokens made entirely of punctuation/separators are excluded.
+MIDDLE_DOTS = frozenset('·ㆍᆞ⋅∙・･')
+PUNCTUATION_FILTER_VERSION = 2
+
+
 @dataclass
 class StatisticsResult:
     path: str
@@ -71,6 +77,10 @@ def settings_checked(settings):
     settings.setdefault('excluded_forms', [])
     if type(settings['exclude_punctuation']) is not bool:
         raise ValueError('문장부호 제외 설정은 참/거짓이어야 합니다.')
+    if settings['exclude_punctuation']:
+        settings['punctuation_filter_version'] = PUNCTUATION_FILTER_VERSION
+    else:
+        settings.pop('punctuation_filter_version', None)
     forms = settings['excluded_forms']
     if not isinstance(forms, list) or any(not isinstance(form, str) or not form.strip() for form in forms):
         raise ValueError('제외 형태소는 비어 있지 않은 문자열 목록이어야 합니다.')
@@ -112,7 +122,7 @@ def analyze_statistics(source, settings, result_dir, cancel=None, progress=None,
     excluded = set(settings['excluded_forms'])
     def eligible(token):
         return (token[0] not in excluded
-                and not (settings['exclude_punctuation'] and all(unicodedata.category(char).startswith('P') for char in token[0]))
+                and not (settings['exclude_punctuation'] and all(char in MIDDLE_DOTS or unicodedata.category(char).startswith('P') for char in token[0]))
                 and (not prefixes or token[1].startswith(prefixes)))
     root = Path(result_dir)
     root.mkdir(parents=True, exist_ok=True)
