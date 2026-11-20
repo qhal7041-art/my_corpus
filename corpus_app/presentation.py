@@ -2,24 +2,25 @@
 import csv
 import io
 import re
+import sys
 from pathlib import Path
 from PyQt6.QtCore import Qt, QEvent
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QFont, QFontDatabase, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QToolButton, QFrame, QScrollArea, QSplitter, QPlainTextEdit,
     QTableWidget, QAbstractItemView, QComboBox, QSizePolicy)
 
 STYLE = '''
-QWidget { color: #243247; font-size: 13px; }
+QWidget { color: #243247; }
 QMainWindow, QDialog, QWidget#page { background: #f5f7fa; }
 QFrame#card, QWidget#card { background: white; border: 1px solid #e0e6ee; border-radius: 10px; }
 QFrame#sidebar { background: #edf1f6; border: none; border-right: 1px solid #dce3ed; }
 QLabel { background: transparent; border: none; }
-QLabel[role="title"] { font-size: 23px; font-weight: 700; color: #172f50; }
-QLabel[role="hero"] { font-size: 32px; font-weight: 700; color: #172f50; }
-QLabel[role="section"] { font-size: 14px; font-weight: 600; color: #283f60; }
+QLabel[role="title"] { font-size: 17pt; font-weight: 700; color: #172f50; }
+QLabel[role="hero"] { font-size: 24pt; font-weight: 700; color: #172f50; }
+QLabel[role="section"] { font-size: 10pt; font-weight: 600; color: #283f60; }
 QLabel[role="muted"] { color: #637187; }
-QLabel[role="metric"] { font-size: 23px; font-weight: 600; color: #172f50; }
+QLabel[role="metric"] { font-size: 17pt; font-weight: 600; color: #172f50; }
 QLabel[role="empty"] { color: #77869b; padding: 20px; }
 QPushButton { background: white; border: 1px solid #cfd8e5; border-radius: 6px; padding: 8px 12px; min-height: 18px; }
 QPushButton:hover { background: #edf3fb; border-color: #9eb3cf; }
@@ -72,14 +73,27 @@ QToolTip { background: #243b59; color: white; padding: 6px; border: none; }
 '''
 
 
+def preferred_font_family(available, platform_name):
+    """Choose an installed Korean UI font instead of a Latin-first fallback list."""
+    common = ['Noto Sans CJK KR', 'Noto Sans KR', 'NanumGothic']
+    preferred = (['Malgun Gothic', '맑은 고딕'] + common if platform_name == 'win32'
+                 else ['Apple SD Gothic Neo'] + common if platform_name == 'darwin'
+                 else common + ['Malgun Gothic', 'Apple SD Gothic Neo'])
+    installed = {family.casefold(): family for family in available}
+    return next((installed[name.casefold()] for name in preferred if name.casefold() in installed), None)
+
+
 def apply_theme():
     app = QApplication.instance()
     if not app or app.property('corpus_theme_applied'):
         return
     app.setStyle('Fusion')
     font = QFont(app.font())
-    font.setFamilies(['Segoe UI', 'Noto Sans CJK KR', 'Malgun Gothic', 'Apple SD Gothic Neo', font.family()])
-    font.setPointSize(10)
+    family = preferred_font_family(QFontDatabase.families(), sys.platform)
+    if family:
+        font.setFamily(family)
+    font.setPointSizeF(max(10, font.pointSizeF()))
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     app.setFont(font)
     app.setStyleSheet(STYLE.replace('@ASSETS@', (Path(__file__).parent / 'assets').as_posix()))
     app.setProperty('corpus_theme_applied', True)

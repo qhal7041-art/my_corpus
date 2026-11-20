@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QInputDialog, QMessageBox, QStackedWidget, QComboBox,
     QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem,
     QSplitter, QProgressBar, QPlainTextEdit, QHeaderView, QAbstractItemView,
-    QFrame, QLineEdit, QTabWidget, QSizePolicy, QScrollArea,
+    QFrame, QLineEdit, QTabWidget, QSizePolicy, QScrollArea, QGridLayout,
 )
 from .presentation import apply_theme, label, primary, StatusLabel, DetailsPanel, finish_ui, table_item, result_name
 from .help_ui import helped
@@ -47,17 +47,24 @@ class MainWindow(QMainWindow):
 
     def build_welcome(self):
         page = QWidget(); page.setObjectName('page')
-        outer = QVBoxLayout(page); outer.setContentsMargins(50, 40, 50, 40)
-        outer.addStretch()
+        outer = QVBoxLayout(page); outer.setContentsMargins(12, 0, 12, 0)
+        self.welcome_scroll = QScrollArea(); self.welcome_scroll.setWidgetResizable(True)
+        holder = QWidget(); holder.setObjectName('page')
+        center = QGridLayout(holder); center.setContentsMargins(12, 24, 12, 24)
+        center.setColumnStretch(0, 1); center.setColumnStretch(1, 8); center.setColumnStretch(2, 1)
+        center.setRowStretch(0, 1); center.setRowStretch(2, 1)
         card = QFrame(); card.setObjectName('card'); card.setMaximumWidth(760)
-        layout = QVBoxLayout(card); layout.setContentsMargins(48, 40, 48, 40); layout.setSpacing(18)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout = QVBoxLayout(card); layout.setContentsMargins(32, 28, 32, 28); layout.setSpacing(16)
         layout.addWidget(label('한국어 말뭉치 분석', 'section'))
         layout.addWidget(label('말뭉치 연구실', 'hero'))
         layout.addWidget(label('자료를 불러오고, 분석 결과를 연구 프로젝트에 모아 보세요.'))
-        steps = QHBoxLayout()
+        # Separate wrapping step widgets let Qt measure each description at its actual width.
         for title, description in [('01  자료 선택', 'JSON · TXT · Excel'), ('02  형태소 분석', '분석기 또는 사전 분석 자료'), ('03  통계·내보내기', '연어 · N-gram · 핵심도')]:
-            box = QVBoxLayout(); box.addWidget(label(title, 'section')); box.addWidget(label(description)); steps.addLayout(box)
-        layout.addLayout(steps)
+            step = QWidget(); box = QVBoxLayout(step)
+            box.setContentsMargins(0, 0, 0, 0); box.setSpacing(4)
+            box.addWidget(label(title, 'section')); box.addWidget(label(description))
+            layout.addWidget(step)
         row = QHBoxLayout()
         self.welcome_new = primary(QPushButton('새 프로젝트 만들기'))
         self.welcome_new.clicked.connect(self.new_project)
@@ -67,8 +74,8 @@ class MainWindow(QMainWindow):
             button.setMinimumHeight(30); row.addWidget(button)
         layout.addLayout(row)
         layout.addWidget(label('이미 형태소·품사가 붙은 TXT도 재분석 없이 사용할 수 있습니다.'))
-        outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
-        outer.addStretch()
+        center.addWidget(card, 1, 1)
+        self.welcome_scroll.setWidget(holder); outer.addWidget(self.welcome_scroll)
         self.stack.addWidget(page)
 
     def build_workspace(self):
@@ -84,7 +91,7 @@ class MainWindow(QMainWindow):
         self.data_button.clicked.connect(lambda: (self.workspace_tabs.setCurrentIndex(0), self.data_button.setChecked(True)))
         self.morph_button = QPushButton('02   형태소 분석…'); self.morph_button.setProperty('role', 'nav')
         self.morph_button.clicked.connect(self.open_morphology)
-        self.statistics_button = QPushButton('03   통계·핵심도…'); self.statistics_button.setProperty('role', 'nav')
+        self.statistics_button = QPushButton('03   연어·N-gram…'); self.statistics_button.setProperty('role', 'nav')
         self.statistics_button.clicked.connect(self.open_statistics)
         for button in (self.data_button, self.morph_button, self.statistics_button): nav.addWidget(button)
         nav.addSpacing(12)

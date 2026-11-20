@@ -5,7 +5,7 @@ from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QSpinBox, QCheckBox, QSizePolicy)
-from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name
+from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name, label
 from .help_ui import helped
 from .workers import FunctionWorker
 from .tagged_import import import_tagged, import_database
@@ -286,8 +286,8 @@ class StatisticsDialog(JobDialog):
         layout.addWidget(self.confirm_external)
         row = QHBoxLayout()
         self.kind = QComboBox()
-        self.kind.addItem('N-gram 빈도', 'ngram')
-        self.kind.addItem('연어 (중심어 지정 / 전체 쌍)', 'collocation')
+        self.kind.addItem('N-gram 빈도 · 단일 말뭉치', 'ngram')
+        self.kind.addItem('연어 · 단일 말뭉치', 'collocation')
         self.kind.addItem('참조 말뭉치 N-gram 핵심도', 'keyness')
         self.kind.currentIndexChanged.connect(self.kind_changed)
         row.addWidget(self.kind)
@@ -365,13 +365,14 @@ class StatisticsDialog(JobDialog):
         self.cross.setText('발화 연결 (파일 경계 유지)')
         self.include_pos.setText('형태소와 품사 함께 사용')
         self.run_button.setText('통계 계산')
+        self.mode_hint = label('')
         self.view_button.setText('조회 적용')
         self.open_button.setText('열기')
         self.export_button.setText('전체 통계 결과 내보내기…')
         self.low_only.setText('기대빈도 5 미만만 조회')
         primary(self.run_button)
         arrange_dialog(self, '통계 분석', '저장된 형태소 결과로 연어·N-gram·참조 핵심도를 계산합니다.',
-            ['분석 종류', helped(self.kind, 'kind'), self.source_label, helped(self.source, 'source'), self.reference_label, helped(self.reference, 'reference'),
+            ['분석 종류', helped(self.kind, 'kind'), self.mode_hint, self.source_label, helped(self.source, 'source'), self.reference_label, helped(self.reference, 'reference'),
              helped(self.confirm_external, 'confirm'), '분석 조건', helped(self.pos, 'pos'), helped(self.exclude_punctuation, 'exclude_punctuation'), '추가 제외 형태소', helped(self.excluded_forms, 'excluded_forms'), helped(self.cross, 'cross'), helped(self.n, 'n'), helped(self.include_pos, 'include_pos'),
              helped(self.keyness_metric, 'keyness'), helped(self.center, 'center'), helped(self.left, 'left'), helped(self.right, 'right'), helped(self.minimum, 'minimum'), helped(self.metric, 'metric'), self.run_button],
             ['분석 결과', [self.saved, self.open_button], [self.sort, self.limit, self.view_button], helped(self.low_only, 'low'),
@@ -379,7 +380,10 @@ class StatisticsDialog(JobDialog):
         for selector in (self.source, self.reference):
             selector.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         settings = project.analysis_settings.get('statistics', {})
-        self.kind.setCurrentIndex(max(0, self.kind.findData(settings.get('kind', 'ngram'))))
+        initial_kind = settings.get('kind', 'ngram')
+        if initial_kind == 'keyness' and not any(entry.get('type') == 'morphology' and (entry.get('role') == 'reference' or entry.get('path') == settings.get('reference_result')) for entry in project.results):
+            initial_kind = 'ngram'
+        self.kind.setCurrentIndex(max(0, self.kind.findData(initial_kind)))
         self.pos.setText(settings.get('pos', ''))
         self.exclude_punctuation.setChecked(settings.get('exclude_punctuation', False))
         self.excluded_forms.setPlainText('\n'.join(settings.get('excluded_forms', [])))
@@ -411,7 +415,9 @@ class StatisticsDialog(JobDialog):
         self.include_pos.setVisible(ngram)
         for control in (self.center, self.left, self.right, self.minimum, self.metric):
             control.setVisible(not ngram)
-        self.source_label.setText('대상 말뭉치 형태소 결과' if keyness else '형태소 분석 결과')
+        self.source_label.setText('대상 말뭉치 형태소 결과' if keyness else '분석할 말뭉치의 형태소 결과')
+        self.mode_hint.setText('대상·참조 결과를 비교합니다. 두 결과에 같은 분석 조건이 필요합니다.' if keyness else '선택한 말뭉치만 분석합니다. 참조 말뭉치는 필요하지 않습니다.')
+        self.run_button.setText('핵심도 비교 계산' if keyness else 'N-gram 빈도 계산' if ngram else '연어 계산')
         for widget in (self.reference, self.reference_label, self.confirm_external, self.keyness_metric):
             widget.setVisible(keyness)
         self.sort.setItemText(0, '전체 결과: 대상 빈도순' if keyness else '전체 결과: 빈도순')

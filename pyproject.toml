@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "korean-corpus-desktop"
-version = "0.6.2"
+version = "0.6.3"
 description = "한국어 JSON 말뭉치 탐색 및 연구 프로젝트 관리"
 requires-python = ">=3.10"
 dependencies = ["PyQt6>=6.7,<7", "openpyxl>=3.1,<4", "xlrd>=2,<3"]
