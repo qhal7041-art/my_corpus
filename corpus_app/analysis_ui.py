@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
     QComboBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QSpinBox, QCheckBox)
 from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name
+from .help_ui import helped
 from .workers import FunctionWorker
 from .tagged_import import import_tagged, import_database
 from .statistics.analysis import analyze_statistics, load_statistics
@@ -364,10 +365,10 @@ class StatisticsDialog(JobDialog):
         self.low_only.setText('기대빈도 5 미만만 조회')
         primary(self.run_button)
         arrange_dialog(self, '통계 분석', '저장된 형태소 결과로 연어·N-gram·참조 핵심도를 계산합니다.',
-            ['분석 종류', self.kind, self.source_label, self.source, self.reference_label, self.reference,
-             self.confirm_external, '분석 조건', self.pos, self.cross, self.n, self.include_pos,
-             self.keyness_metric, self.center, self.left, self.right, self.minimum, self.metric, self.run_button],
-            ['분석 결과', [self.saved, self.open_button], [self.sort, self.limit, self.view_button], self.low_only,
+            ['분석 종류', helped(self.kind, 'kind'), self.source_label, helped(self.source, 'source'), self.reference_label, helped(self.reference, 'reference'),
+             helped(self.confirm_external, 'confirm'), '분석 조건', helped(self.pos, 'pos'), helped(self.cross, 'cross'), helped(self.n, 'n'), helped(self.include_pos, 'include_pos'),
+             helped(self.keyness_metric, 'keyness'), helped(self.center, 'center'), helped(self.left, 'left'), helped(self.right, 'right'), helped(self.minimum, 'minimum'), helped(self.metric, 'metric'), self.run_button],
+            ['분석 결과', [self.saved, self.open_button], [self.sort, self.limit, self.view_button], helped(self.low_only, 'low'),
              self.table, self.export_button, self.summary, [self.progress, self.cancel_button], self.details_panel])
         settings = project.analysis_settings.get('statistics', {})
         self.kind.setCurrentIndex(max(0, self.kind.findData(settings.get('kind', 'ngram'))))

@@ -57,6 +57,9 @@ QLabel[state="warning"] { background: #fff5df; color: #89601d; }
 QLabel[state="error"] { background: #fceeee; color: #a03737; }
 QLabel[state="busy"] { background: #eaf1fb; color: #305a8c; }
 QToolButton { border: none; background: transparent; padding: 7px 0px; color: #506580; }
+QToolButton[role="help"] { border: 1px solid #9caec4; border-radius: 12px; padding: 0px; color: #385b83; background: #f3f7fc; font-weight: 600; }
+QToolButton[role="help"]:hover { background: #dfeafa; border-color: #527cad; }
+QToolButton[role="help"]:focus { border: 2px solid #527cad; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { width: 11px; background: #f0f3f7; }
 QScrollBar::handle:vertical { background: #bbc7d7; min-height: 30px; border-radius: 5px; margin: 2px; }

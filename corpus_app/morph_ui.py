@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBo
     QCheckBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QAbstractItemView, QHeaderView, QProgressBar, QLineEdit, QSpinBox)
 from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name
+from .help_ui import helped
 from .workers import FunctionWorker
 from .analyzers.registry import status
 from .morphology import analyze_corpus, load_result
@@ -82,7 +83,7 @@ class MorphDialog(QDialog):
         self.local_threads.setRange(1, 32)
         self.local_threads.setValue(2)
         self.local_threads.setPrefix('로컬 CPU 스레드: ')
-        self.local_sense = QCheckBox('로컬: 동형이의어 어깨번호 포함 (sense)')
+        self.local_sense = QCheckBox('동형이의어 어깨번호 포함')
         self.local_nouns = QPlainTextEdit()
         self.local_nouns.setPlaceholderText('로컬 고유명사 사용자 사전: 한 줄에 한 단어. 예: 제주방언')
         self.local_nouns.setMaximumHeight(70)
@@ -158,11 +159,11 @@ class MorphDialog(QDialog):
         self.export_button.setText('전체 형태소 결과 내보내기…')
         primary(self.run_button)
         arrange_dialog(self, '형태소 분석', '분석기를 선택하고 설정한 뒤, 발화별 형태소와 품사를 확인하세요.',
-            ['분석 대상', self.source_description, '분석기', self.engine, self.availability,
-             *[control for _, control in self.options], self.dictionary_label, self.dictionary,
-             self.key_label, self.api_key, *[control for _, control in self.bareun_options], self.server_dicts,
-             self.utagger_version, self.local_threads, self.local_sense, self.local_nouns_label, self.local_nouns,
-             self.local_cache_label, self.local_cache, self.save_options, self.run_button],
+            ['분석 대상', self.source_description, '분석기', helped(self.engine, 'engine'), self.availability,
+             *[helped(control, key) for key, control in self.options], helped(self.dictionary_label, 'user_dictionary'), self.dictionary,
+             helped(self.key_label, 'bareun_key'), self.api_key, *[helped(control, key) for key, control in self.bareun_options], helped(self.server_dicts, 'server_dicts'),
+             helped(self.utagger_version, 'utagger_version'), helped(self.local_threads, 'threads'), helped(self.local_sense, 'sense'), helped(self.local_nouns_label, 'user_nouns'), self.local_nouns,
+             helped(self.local_cache_label, 'model_cache'), self.local_cache, self.save_options, self.run_button],
             ['저장된 결과', [self.saved_results, self.load_button], self.table, self.export_button,
              self.summary, [self.progress, self.cancel_button], self.details_panel])
         self.refresh()

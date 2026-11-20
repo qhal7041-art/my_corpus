@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QFrame, QLineEdit, QTabWidget, QSizePolicy, QScrollArea,
 )
 from .presentation import apply_theme, label, primary, StatusLabel, DetailsPanel, finish_ui, table_item, result_name
+from .help_ui import helped
 from .project import Project
 from .workers import CorpusWorker
 from .json_corpus import display_path
@@ -110,7 +111,7 @@ class MainWindow(QMainWindow):
         self.workspace_tabs.addTab(self.data_scroll, '자료 탐색')
         row = QHBoxLayout()
         self.role = QComboBox(); self.role.addItem('대상 말뭉치', 'target'); self.role.addItem('참조 말뭉치', 'reference')
-        self.role.currentIndexChanged.connect(self.source_changed); row.addWidget(self.role, 1)
+        self.role.currentIndexChanged.connect(self.source_changed); row.addWidget(helped(self.role, 'role'), 1)
         self.connect_button = primary(QPushButton('폴더 연결 / 재연결…')); self.connect_button.clicked.connect(self.connect_folder); row.addWidget(self.connect_button)
         self.scan_button = QPushButton('구조 다시 읽기'); self.scan_button.clicked.connect(self.scan); row.addWidget(self.scan_button)
         layout.addLayout(row)
@@ -124,7 +125,7 @@ class MainWindow(QMainWindow):
             self.metric_values[key] = value
         layout.addLayout(metrics)
         self.selected_label = label(''); self.selected_label.setWordWrap(False); self.selected_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.selected_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred); layout.addWidget(self.selected_label)
+        self.selected_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred); layout.addWidget(helped(self.selected_label, 'field'))
         self.schema_search = QLineEdit(); self.schema_search.setPlaceholderText('필드 경로 또는 자료형 검색'); self.schema_search.setClearButtonEnabled(True)
         self.search_timer = QTimer(self); self.search_timer.setSingleShot(True); self.search_timer.setInterval(150)
         self.schema_search.textChanged.connect(lambda: self.search_timer.start()); self.search_timer.timeout.connect(self.filter_tree)
