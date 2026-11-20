@@ -105,6 +105,8 @@ def analyze_keyness(target, reference, settings, result_dir, cancel=None, progre
     if metric not in ('G²', 'χ²'):
         raise ValueError('핵심도 지표는 G² 또는 χ²이어야 합니다.')
     shared = settings_checked({'kind': 'ngram', 'n': settings.get('n', 2), 'pos': settings.get('pos', ''),
+                              'exclude_punctuation': settings.get('exclude_punctuation', False),
+                              'excluded_forms': settings.get('excluded_forms', []),
                               'include_pos': settings.get('include_pos', False), 'cross_utterances': settings.get('cross_utterances', False)})
     target, reference = Path(target).resolve(), Path(reference).resolve()
     first, second = load_result(target), load_result(reference)

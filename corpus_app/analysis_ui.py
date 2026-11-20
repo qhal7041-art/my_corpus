@@ -4,7 +4,7 @@ import json
 from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QSpinBox, QCheckBox)
+    QHeaderView, QAbstractItemView, QProgressBar, QFileDialog, QSpinBox, QCheckBox, QSizePolicy)
 from .presentation import apply_theme, StatusLabel, DetailsPanel, primary, arrange_dialog, table_item, result_name
 from .help_ui import helped
 from .workers import FunctionWorker
@@ -294,6 +294,12 @@ class StatisticsDialog(JobDialog):
         self.pos = QLineEdit()
         self.pos.setPlaceholderText('품사 접두어 필터 (예: NN*,VV · 비우면 전체)')
         row.addWidget(self.pos, 1)
+        self.exclude_punctuation = QCheckBox('문장부호 제외')
+        layout.addWidget(self.exclude_punctuation)
+        self.excluded_forms = QPlainTextEdit()
+        self.excluded_forms.setPlaceholderText('추가로 제외할 형태소: 한 줄에 하나\n예: 것')
+        self.excluded_forms.setMaximumHeight(80)
+        layout.addWidget(self.excluded_forms)
         self.cross = QCheckBox('발화 경계 넘기 (파일 경계는 유지)')
         row.addWidget(self.cross)
         layout.addLayout(row)
@@ -351,12 +357,12 @@ class StatisticsDialog(JobDialog):
         self.export_button.clicked.connect(self.open_export)
         layout.addWidget(self.export_button)
         self.job_footer(layout)
-        self.inputs = [self.source, self.kind, self.pos, self.cross, self.n, self.include_pos, self.center,
+        self.inputs = [self.source, self.kind, self.pos, self.exclude_punctuation, self.excluded_forms, self.cross, self.n, self.include_pos, self.center,
                        self.left, self.right, self.minimum, self.metric, self.run_button, self.saved, self.open_button,
                        self.sort, self.limit, self.view_button, self.reference, self.confirm_external, self.keyness_metric, self.export_button, self.low_only]
         self.confirm_external.setToolTip(self.confirm_external.text())
         self.confirm_external.setText('분석 방식·품사·사전의 동일성 확인')
-        self.cross.setText('발화 경계 넘기 · 파일 경계 유지')
+        self.cross.setText('발화 연결 (파일 경계 유지)')
         self.include_pos.setText('형태소와 품사 함께 사용')
         self.run_button.setText('통계 계산')
         self.view_button.setText('조회 적용')
@@ -366,13 +372,17 @@ class StatisticsDialog(JobDialog):
         primary(self.run_button)
         arrange_dialog(self, '통계 분석', '저장된 형태소 결과로 연어·N-gram·참조 핵심도를 계산합니다.',
             ['분석 종류', helped(self.kind, 'kind'), self.source_label, helped(self.source, 'source'), self.reference_label, helped(self.reference, 'reference'),
-             helped(self.confirm_external, 'confirm'), '분석 조건', helped(self.pos, 'pos'), helped(self.cross, 'cross'), helped(self.n, 'n'), helped(self.include_pos, 'include_pos'),
+             helped(self.confirm_external, 'confirm'), '분석 조건', helped(self.pos, 'pos'), helped(self.exclude_punctuation, 'exclude_punctuation'), '추가 제외 형태소', helped(self.excluded_forms, 'excluded_forms'), helped(self.cross, 'cross'), helped(self.n, 'n'), helped(self.include_pos, 'include_pos'),
              helped(self.keyness_metric, 'keyness'), helped(self.center, 'center'), helped(self.left, 'left'), helped(self.right, 'right'), helped(self.minimum, 'minimum'), helped(self.metric, 'metric'), self.run_button],
             ['분석 결과', [self.saved, self.open_button], [self.sort, self.limit, self.view_button], helped(self.low_only, 'low'),
              self.table, self.export_button, self.summary, [self.progress, self.cancel_button], self.details_panel])
+        for selector in (self.source, self.reference):
+            selector.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         settings = project.analysis_settings.get('statistics', {})
         self.kind.setCurrentIndex(max(0, self.kind.findData(settings.get('kind', 'ngram'))))
         self.pos.setText(settings.get('pos', ''))
+        self.exclude_punctuation.setChecked(settings.get('exclude_punctuation', False))
+        self.excluded_forms.setPlainText('\n'.join(settings.get('excluded_forms', [])))
         self.cross.setChecked(settings.get('cross_utterances', False))
         self.n.setValue(settings.get('n', 2))
         self.include_pos.setChecked(settings.get('include_pos', False))
@@ -431,7 +441,9 @@ class StatisticsDialog(JobDialog):
                     self.saved.setCurrentIndex(self.saved.count() - 1)
 
     def settings(self):
-        result = {'kind': self.kind.currentData(), 'pos': self.pos.text(), 'cross_utterances': self.cross.isChecked()}
+        result = {'kind': self.kind.currentData(), 'pos': self.pos.text(), 'cross_utterances': self.cross.isChecked(),
+                  'exclude_punctuation': self.exclude_punctuation.isChecked(),
+                  'excluded_forms': sorted({line.strip() for line in self.excluded_forms.toPlainText().splitlines() if line.strip()})}
         if result['kind'] in ('ngram', 'keyness'):
             result.update(n=self.n.value(), include_pos=self.include_pos.isChecked())
             if result['kind'] == 'keyness':

@@ -10,6 +10,7 @@ import math
 import os
 import sqlite3
 import tempfile
+import unicodedata
 from ..json_corpus import checkpoint, Cancelled
 from ..morphology import load_result, pack
 
@@ -66,6 +67,14 @@ def settings_checked(settings):
         raise ValueError('지원하지 않는 통계 분석 종류입니다.')
     if not isinstance(settings.get('pos', ''), str):
         raise ValueError('품사 필터는 문자열이어야 합니다.')
+    settings.setdefault('exclude_punctuation', False)
+    settings.setdefault('excluded_forms', [])
+    if type(settings['exclude_punctuation']) is not bool:
+        raise ValueError('문장부호 제외 설정은 참/거짓이어야 합니다.')
+    forms = settings['excluded_forms']
+    if not isinstance(forms, list) or any(not isinstance(form, str) or not form.strip() for form in forms):
+        raise ValueError('제외 형태소는 비어 있지 않은 문자열 목록이어야 합니다.')
+    settings['excluded_forms'] = sorted({form.strip() for form in forms})
     settings.setdefault('pos', '')
     settings.setdefault('cross_utterances', False)
     if type(settings['cross_utterances']) is not bool:
@@ -100,8 +109,11 @@ def analyze_statistics(source, settings, result_dir, cancel=None, progress=None,
     original = load_result(source)
     kind = settings['kind']
     prefixes = tuple(v.strip().rstrip('*') for v in settings['pos'].split(',') if v.strip())
+    excluded = set(settings['excluded_forms'])
     def eligible(token):
-        return not prefixes or token[1].startswith(prefixes)
+        return (token[0] not in excluded
+                and not (settings['exclude_punctuation'] and all(unicodedata.category(char).startswith('P') for char in token[0]))
+                and (not prefixes or token[1].startswith(prefixes)))
     root = Path(result_dir)
     root.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=root, suffix='.sqlite.tmp')
@@ -209,7 +221,7 @@ def analyze_statistics(source, settings, result_dir, cancel=None, progress=None,
                 result_count += 1
         note = ''
         if not total_items:
-            note = '선택 품사와 경계 조건에서 생성된 N-gram/공기 슬롯이 0입니다. n·탐색 범위·발화 길이·품사 필터를 확인하세요.'
+            note = '선택 품사와 경계 조건에서 생성된 N-gram/공기 슬롯이 0입니다. n·탐색 범위·발화 길이·품사 필터·제외 설정을 확인하세요.'
         elif not result_count:
             note = '최소 빈도 또는 중심어 조건에 맞는 후보가 없습니다.'
         metadata = {'format': 1, 'complete': True, 'kind': kind, 'settings': settings,
